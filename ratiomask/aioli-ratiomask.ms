@@ -26,10 +26,8 @@
     Overlay mechanism inspired by Image Comp Helper (Warren Wnuk / C. Buelter).
 ***************************************************************************************/
 
-macroScript aioli_ratiomask
-    category:"aioli"
-    tooltip:"aioli-ratiomask - viewport crop-ratio matte"
-    buttonText:"ratiomask"
+global aioli_ratiomask_open   -- entry point called by the macroScript
+
 (
     ----------------------------------------------------------------------------
     -- State shared with the redraw callback (globals, so they survive the call)
@@ -359,15 +357,74 @@ macroScript aioli_ratiomask
         )
     )
 
-    createDialog rcmRoll style:#(#style_titlebar, #style_border, #style_sysmenu)
+    ----------------------------------------------------------------------------
+    -- GLOBAL ENTRY POINT
+    -- Exposes opening the window so that the macroScript (toolbar button /
+    -- keyboard shortcut) can call it without reloading the file.
+    ----------------------------------------------------------------------------
+    fn aioli_ratiomask_open =
+    (
+        try (destroyDialog rcmRoll) catch()
+        createDialog rcmRoll style:#(#style_titlebar, #style_border, #style_sysmenu)
+    )
+)
+
+------------------------------------------------------------------------
+-- MACROSCRIPT REGISTRATION
+-- Creates the "ratiomask" entry in the "aioli" category of
+-- Customize > Customize User Interface. Evaluating this block is enough:
+-- 3ds Max writes the matching .mcr into its usermacros folder itself, so
+-- the entry stays available on the next startups.
+--
+-- THE PATH TO THIS FILE IS BAKED INTO THE MACRO at drag & drop time, the
+-- same way aioli-sunpos and aioli-clonelayers do it. The macro stays a thin
+-- launcher instead of carrying a copy of the code, so the toolbar button
+-- follows git pull. Move the folder and you just drag the .ms in again.
+------------------------------------------------------------------------
+(
+    local thisFile = ""
+    try (thisFile = getSourceFileName()) catch()
+    if thisFile == undefined do thisFile = ""
+
+    -- Evaluated from the Listener rather than from a file: fall back to the
+    -- documented install location.
+    if thisFile == "" do
+        thisFile = (getDir #userScripts) + "\\aioli\\ratiomask\\aioli-ratiomask.ms"
+
+    local src = ""
+    src += "macroScript aioli_ratiomask category:\"aioli\" buttonText:\"ratiomask\" "
+    src += "toolTip:\"aioli-ratiomask - viewport crop-ratio matte\"\n"
+    src += "(\n"
+    src += "    on execute do\n"
+    src += "    (\n"
+    src += "        if aioli_ratiomask_open != undefined then\n"
+    src += "            aioli_ratiomask_open()\n"
+    src += "        else\n"
+    src += "        (\n"
+    src += "            -- Not loaded yet in this session of Max: read the file\n"
+    src += "            -- again. Running it re-registers the macro and opens\n"
+    src += "            -- the window, so edits pulled from git apply at once.\n"
+    src += "            local p = @\"" + thisFile + "\"\n"
+    src += "            if doesFileExist p then\n"
+    src += "                fileIn p\n"
+    src += "            else\n"
+    src += "                messageBox (\"Script not found:\\n\" + p + \"\\n\\n\" + \\\n"
+    src += "                            \"Did the folder move? \" + \\\n"
+    src += "                            \"Drag aioli-ratiomask.ms into 3ds Max again.\") \\\n"
+    src += "                           title:\"aioli-ratiomask\"\n"
+    src += "        )\n"
+    src += "    )\n"
+    src += ")\n"
+    execute src
+
+    format "[aioli-ratiomask] macro \"ratiomask\" registered (category \"aioli\")\n"
+    format "[aioli-ratiomask] script : %\n" thisFile
+    format "[aioli-ratiomask] button : Customize > Customize User Interface > Toolbars > Category \"aioli\"\n"
 )
 
 ------------------------------------------------------------------------
 -- LAUNCH
--- Run Script only DEFINES a macroScript, it does not run it. Firing it
--- once here is what makes the panel open straight away on drag & drop,
--- the same way aioli-clonelayers does. Wrapped in try/catch so that a
--- panel that is already open can never turn into an error.
+-- Run Script only DEFINES a macroScript, it does not run it: opening the
+-- panel here is what makes drag & drop behave like the other two tools.
 ------------------------------------------------------------------------
-format "[aioli-ratiomask] macroScript registered - category \"aioli\", action \"ratiomask\"\n"
-try (macros.run "aioli" "aioli_ratiomask") catch()
+aioli_ratiomask_open()
