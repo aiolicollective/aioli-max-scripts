@@ -18,9 +18,9 @@ nothing to install.
 
 For a **permanent toolbar button** (once and for all):
 `Customize > Customize User Interface…`, **Toolbars** tab, category **`aioli`**,
-drag `aioli-sunpos` onto a toolbar. The path to this folder is baked into the
-macro at drag & drop time, so a `git pull` here updates the button too. If you
-move the folder, drag the `.ms` in once more.
+drag **`sunpos`** onto a toolbar. The path to this folder is baked into the macro
+at drag & drop time, so a `git pull` here updates the button too. If you move the
+folder, drag the `.ms` in once more.
 
 Written for 3ds Max 2026 (Python 3.11 + `pymxs` + PySide6), with an automatic
 fallback to PySide2 on earlier versions. System units are read automatically.
