@@ -1,0 +1,2 @@
+timezonefinder>=6.5
+tzdata>=2024.1
