@@ -4,11 +4,11 @@
 --  USAGE
 --    Drag THIS file into a 3ds Max window (drag & drop).
 --      -> the panel opens straight away;
---      -> a macro "aioli-sunpos" is registered under the "aioli" category.
+--      -> a macro "sunpos" is registered under the "aioli" category.
 --
 --    For a permanent button (once and for all):
 --      Customize > Customize User Interface... > Toolbars tab,
---      Category = "aioli", drag "aioli-sunpos" onto a toolbar.
+--      Category = "aioli", drag "sunpos" onto a toolbar.
 --
 --  WHERE DOES THE MACRO GO?  Not into this folder: 3ds Max writes it into ITS
 --  own user files, at
@@ -39,7 +39,7 @@
         -- The macro is built with the path hard-coded: no side-car config file
         -- to keep in sync.
         local src = ""
-        src += "macroScript aioli_sunpos category:\"aioli\" buttonText:\"aioli-sunpos\" "
+        src += "macroScript aioli_sunpos category:\"aioli\" buttonText:\"sunpos\" "
         src += "toolTip:\"aioli-sunpos - place the sun from a GPS point / date / time\"\n"
         src += "(\n"
         src += "    on execute do\n"
@@ -62,7 +62,7 @@
         src += ")\n"
         execute src
 
-        format "[aioli-sunpos] macro \"aioli-sunpos\" registered (category \"aioli\")\n"
+        format "[aioli-sunpos] macro \"sunpos\" registered (category \"aioli\")\n"
         format "[aioli-sunpos] script : %\n" pyFile
         format "[aioli-sunpos] button : Customize > Customize User Interface > Toolbars > Category \"aioli\"\n"
 

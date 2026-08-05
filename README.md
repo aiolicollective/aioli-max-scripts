@@ -1,7 +1,8 @@
 # aioli-max-scripts
 
-Tools we build for our own 3ds Max work at the [/ai.oli](https://github.com/aiolicollective)
-collective, and keep in one place so they stay usable, updatable and shareable.
+Custom tools the [/ai.oli](https://github.com/aiolicollective) collective builds for
+itself and runs inside 3ds Max, on the productions where we use it. Kept in one place
+so they stay usable, updatable and shareable.
 
 Three tools so far. Each lives in its own folder with its own README.
 
@@ -18,58 +19,49 @@ Three tools so far. Each lives in its own folder with its own README.
 
 ## Install
 
-Everything is designed around **one clone you can `git pull`**, rather than
-copies scattered across machines.
-
-### Recommended — clone into the Max user scripts folder
-
 ```bat
-cd "%LOCALAPPDATA%\Autodesk\3dsMax\2026 - 64bit\ENU\scripts"
-git clone https://github.com/aiolicollective/aioli-max-scripts.git aioli
+git clone https://github.com/aiolicollective/aioli-max-scripts.git
 ```
 
-Adjust `2026` to your version. You end up with:
+Anywhere you like — a tools folder, a synced drive, wherever. Nothing gets copied
+into 3ds Max, and nothing is written outside Max's own preferences.
 
-```
-…\ENU\scripts\aioli\
-├── clonelayers\aioli-clonelayers.ms
-├── ratiomask\aioli-ratiomask.ms
-└── sunpos\aioli-sunpos.ms  (+ the Python modules)
-```
+Then, **once per tool**: drag its `.ms` into a 3ds Max window (or
+`Scripting > Run Script…`). The panel opens, and a macro is registered under the
+**`aioli`** category.
 
-To update later: `git pull` in that folder. Nothing else to do.
+| Tool | File to drag in |
+|---|---|
+| clonelayers | `clonelayers/aioli-clonelayers.ms` |
+| ratiomask | `ratiomask/aioli-ratiomask.ms` |
+| sunpos | `sunpos/aioli-sunpos.ms` |
 
-This location is what lets the `clonelayers` toolbar button find its script
-again after a restart — see *Toolbar buttons* below.
-
-### Otherwise
-
-Clone or download the repo anywhere, and drag the `.ms` you need into a 3ds Max
-window when you need it. Nothing is installed, nothing is written outside Max's
-own preferences.
+To update later: `git pull` in the clone. That is all — the buttons keep pointing at
+the same files and pick the new version up on the next click.
 
 ---
 
-## Use
+## Toolbar buttons
 
-**Drag the `.ms` into a 3ds Max window** (or `Scripting > Run Script…`). The
-panel opens. That is the whole story for a one-off.
+`Customize > Customize User Interface…` > **Toolbars** tab > Category **`aioli`** >
+drag the action onto a toolbar. The same three actions are available in the Menus,
+Quads and Keyboard tabs.
 
-### Toolbar buttons
-
-Running a script once registers a macro under the **`aioli`** category. To get a
-permanent button: `Customize > Customize User Interface…` > **Toolbars** tab >
-Category **`aioli`** > drag the action onto a toolbar. The same actions are
-available in the Menus, Quads and Keyboard tabs.
-
-How each button behaves across restarts and `git pull` differs, and it is worth
-knowing:
-
-| Tool | Survives a Max restart | Follows `git pull` |
+| Category | Action | Macro |
 |---|---|---|
-| **clonelayers** | yes, if the repo is cloned at `…\ENU\scripts\aioli\` | yes |
-| **sunpos** | yes — the path to the clone is baked into the macro when you drag the `.ms` in | yes |
-| **ratiomask** | yes | **no** — the macro holds a snapshot of the code, so re-run the `.ms` once after a pull that changed it |
+| `aioli` | `clonelayers` | `aioli_clonelayers` |
+| `aioli` | `ratiomask` | `aioli_ratiomask` |
+| `aioli` | `sunpos` | `aioli_sunpos` |
+
+All three behave the same way, on purpose:
+
+- **The button survives a restart of 3ds Max.** Max writes the macro into its own
+  `usermacros` folder and re-reads it on startup.
+- **The button follows `git pull`.** Each macro is a thin launcher holding the path
+  to its file in the clone, baked in when you drag the `.ms` in. It never carries a
+  copy of the code, so a pull is enough.
+- **Move the clone and the button breaks** — the baked path no longer resolves. You
+  get an explicit message saying so; drag the `.ms` in once more and it is fixed.
 
 Uninstalling a button means deleting the matching `.mcr` in
 `%LOCALAPPDATA%\Autodesk\3dsMax\<version> - 64bit\ENU\usermacros\`.
@@ -106,14 +98,17 @@ Issues and pull requests welcome.
 ## Contributing
 
 Each tool folder is self-contained; adding a fourth means adding a folder and a
-row in the table above.
+row in the tables above.
 
 Conventions we hold to:
 
 - **The repo is in English**, docs and code alike. Public repo, shared tools.
-- One macro category, `aioli`, for every tool.
-- Scripts named `aioli-<tool>.ms`, so they stay recognisable once they land in a
-  user's Max folders.
+- One macro category, `aioli`, for every tool. Action named after the tool, macro
+  named `aioli_<tool>`, file named `aioli-<tool>.ms` — so a tool is recognisable
+  wherever you meet it.
+- **The macro is a launcher, never a copy of the code.** Bake the path in with
+  `getSourceFileName()` at registration time, the way all three do. That is what
+  keeps `git pull` meaningful.
 - No write to render settings, no write to the source scene beyond what the tool
   is explicitly for. Everything wrapped in a single undo.
 - Design decisions and traps already hit go in the tool's `NOTES.md` — that file
