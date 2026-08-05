@@ -1,0 +1,8 @@
+* text=auto
+
+# Windows-side tooling: git guarantees CRLF in the clone and in the GitHub zip.
+*.bat text eol=crlf
+*.ms  text eol=crlf
+
+*.sh  text eol=lf
+*.py  text eol=lf

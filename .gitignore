@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# 3ds Max leftovers
+*.ini
+*.bak
+*.max
+autoback/
+
+.DS_Store
+Thumbs.db
