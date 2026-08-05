@@ -580,37 +580,54 @@ global aioli_clonelayers_open   -- entry point called by the macroScript
 -- Keyboard tabs). Evaluating this block is enough: 3ds Max writes the
 -- matching .mcr into its usermacros folder itself, so the entry stays
 -- available on the next startups.
+--
+-- THE PATH TO THIS FILE IS BAKED INTO THE MACRO at drag & drop time, the
+-- same way aioli-sunpos does it. That is what makes the toolbar button
+-- work after a restart from WHEREVER the repo was cloned, and keep
+-- following git pull. Move the folder and you just drag the .ms in again.
 ------------------------------------------------------------------------
-macroScript aioli_clonelayers
-	category:"aioli"
-	buttonText:"clonelayers"
-	toolTip:"aioli-clonelayers - clone and rebuild the layer tree"
 (
-	on execute do
-	(
-		if aioli_clonelayers_open != undefined then
-			aioli_clonelayers_open()
-		else
-		(
-			-- The script has not been loaded yet in this session of Max.
-			-- This path is where the repo is meant to be cloned, so that the
-			-- toolbar button keeps working after a restart AND still follows
-			-- git pull. See the README.
-			local p = (getDir #userScripts) + "\\aioli\\clonelayers\\aioli-clonelayers.ms"
+	local thisFile = ""
+	try (thisFile = getSourceFileName()) catch()
+	if thisFile == undefined do thisFile = ""
 
-			if doesFileExist p then
-				fileIn p
-			else
-				messageBox ("Script not found:\n\n" + p + \
-					"\n\nClone aioli-max-scripts into that folder,\n" + \
-					"or run the script once through Scripting > Run Script.") \
-					title:"aioli-clonelayers"
-		)
-	)
+	-- Evaluated from the Listener rather than from a file: fall back to the
+	-- documented install location.
+	if thisFile == "" do
+		thisFile = (getDir #userScripts) + "\\aioli\\clonelayers\\aioli-clonelayers.ms"
+
+	local src = ""
+	src += "macroScript aioli_clonelayers category:\"aioli\" buttonText:\"clonelayers\" "
+	src += "toolTip:\"aioli-clonelayers - clone and rebuild the layer tree\"\n"
+	src += "(\n"
+	src += "    on execute do\n"
+	src += "    (\n"
+	src += "        if aioli_clonelayers_open != undefined then\n"
+	src += "            aioli_clonelayers_open()\n"
+	src += "        else\n"
+	src += "        (\n"
+	src += "            -- Not loaded yet in this session of Max: read the file\n"
+	src += "            -- again. Running it re-registers the macro and opens\n"
+	src += "            -- the window, so edits pulled from git apply at once.\n"
+	src += "            local p = @\"" + thisFile + "\"\n"
+	src += "            if doesFileExist p then\n"
+	src += "                fileIn p\n"
+	src += "            else\n"
+	src += "                messageBox (\"Script not found:\\n\" + p + \"\\n\\n\" + \\\n"
+	src += "                            \"Did the folder move? \" + \\\n"
+	src += "                            \"Drag aioli-clonelayers.ms into 3ds Max again.\") \\\n"
+	src += "                           title:\"aioli-clonelayers\"\n"
+	src += "        )\n"
+	src += "    )\n"
+	src += ")\n"
+	execute src
+
+	format "[aioli-clonelayers] macro \"clonelayers\" registered (category \"aioli\")\n"
+	format "[aioli-clonelayers] script : %\n" thisFile
+	format "[aioli-clonelayers] button : Customize > Customize User Interface > Toolbars > Category \"aioli\"\n"
 )
 
 ------------------------------------------------------------------------
 -- LAUNCH
 ------------------------------------------------------------------------
-format "[aioli-clonelayers] macroScript registered - category \"aioli\", action \"clonelayers\"\n"
 aioli_clonelayers_open()
