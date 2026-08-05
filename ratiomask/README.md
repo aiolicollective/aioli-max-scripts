@@ -31,8 +31,9 @@ A "Ratio Crop Mask" window opens.
 For a permanent button: `Customize > Customize User Interface > Toolbars`,
 category **`aioli`**, drag the **ratiomask** action onto a toolbar.
 
-> The macro holds a snapshot of the code, so after a `git pull` that changed this
-> tool, run the `.ms` once to refresh it.
+The path to this file is baked into the macro when you drag it in, so the button
+survives a restart of Max and follows `git pull`. Move the clone and you just drag
+the `.ms` in once more — see the [root README](../README.md#toolbar-buttons).
 
 ---
 
@@ -89,6 +90,9 @@ reads as a solid fill.
 - Functions: `rcm_field()`, `rcm_fillRect`, `rcm_rectOutline`, `rcm_draw` (the
   callback), `rcm_register` / `rcm_unregister`; on the UI side `pushState()`,
   `setAspect`, `applyCustom()`, `isCustom()`.
+- The tool body sits in a plain block; `aioli_ratiomask_open` is the global the
+  macro calls. Keep it that way — a macroScript that carries the code instead of
+  calling into it is a macroScript that ignores `git pull`.
 
 ---
 

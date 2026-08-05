@@ -28,9 +28,9 @@ Drag `aioli-clonelayers.ms` into a 3ds Max window, or `Scripting > Run Script…
 The panel opens and a macro is registered under the **`aioli`** category
 (action `clonelayers`) for a toolbar button or a keyboard shortcut.
 
-For a button that survives a restart, the repo has to be cloned at
-`%LOCALAPPDATA%\Autodesk\3dsMax\<version> - 64bit\ENU\scripts\aioli\` — see the
-[root README](../README.md#install).
+The path to this file is baked into the macro when you drag it in, so the button
+survives a restart of Max and follows `git pull`. Move the clone and you just drag
+the `.ms` in once more — see the [root README](../README.md#toolbar-buttons).
 
 Settings are remembered between sessions in an `.ini` in `getDir #plugcfg`.
 
