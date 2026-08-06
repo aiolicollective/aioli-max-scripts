@@ -1,5 +1,5 @@
 /***************************************************************************************
-    aioli-ratiomask  (Aioli Ratio Mask)  -  v1.0
+    aioli-ratiomask  (Aioli Ratio Mask)  -  v1.1
     --------------------------------------------------------------------------------
     For 3ds Max 2026 (works on earlier versions with Nitrous too).
 
@@ -16,6 +16,13 @@
       - We paint a matte (4 bands) all around that rectangle.
       - We draw the outline + (option) the rule of thirds.
       - renderWidth/renderHeight are never written to -> render ratio untouched.
+
+    VIEWPORT LOCK :
+      MAXScript can only draw into the ACTIVE viewport, so the overlay used to
+      follow every click. It now honours Max's own render lock (the padlock next
+      to the viewport dropdown in Render Setup): once the lock is closed, the
+      overlay only shows in the viewport that will actually be rendered and stays
+      hidden in the others. Lock open -> old behaviour, it follows the active view.
 
     INSTALLATION :
       Scripting > Run Script... (or drag the .ms into the viewport).
@@ -38,8 +45,6 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
     global RCM_showMask    = true
     global RCM_maskColor   = (color 12 12 12)    -- matte colour (near black)
     global RCM_showThirds  = false
-    global RCM_showFrame   = true                -- outline of the render frame (1:1)
-    global RCM_frameColor  = (color 255 220 0)   -- render frame outline colour
     global RCM_cropColor   = (color 255 255 255) -- ratio outline + thirds colour
     global RCM_offset      = 0.0                  -- frame offset on the free axis (-100..100)
 
@@ -48,6 +53,30 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
     ----------------------------------------------------------------------------
     local presetLabels  = #("1:1","16:9","9:16","4:5","5:4","3:2","2:3","4:3","3:4","2:1","1:2","1.85:1","2.39:1","Custom")
     local presetAspects = #( 1.0, (16.0/9.0), (9.0/16.0), (4.0/5.0), (5.0/4.0), (3.0/2.0), (2.0/3.0), (4.0/3.0), (3.0/4.0), 2.0, 0.5, 1.85, 2.39, 1.0 )
+
+    ----------------------------------------------------------------------------
+    -- Is the overlay allowed to draw in the viewport being redrawn ?
+    --
+    -- gw.* only ever paints into the ACTIVE viewport, so we cannot choose where
+    -- the overlay goes; we can only choose when to stay quiet. Max's render lock
+    -- gives us the target for free:
+    --   rendUseActiveView == false  ->  lock closed, rendViewIndex is rendered
+    --   rendUseActiveView == true   ->  lock open, the active viewport is rendered
+    -- Lock closed and another viewport active -> we skip, so the overlay stops
+    -- hopping around. One viewport only (single layout OR maximized viewport,
+    -- both report numViews == 1) -> no ambiguity, we always draw.
+    ----------------------------------------------------------------------------
+    fn rcm_viewAllowed =
+    (
+        local ok = true
+        try
+        (
+            if (not rendUseActiveView) and viewport.numViews > 1 do
+                ok = (viewport.activeViewport == rendViewIndex)
+        )
+        catch()
+        ok
+    )
 
     ----------------------------------------------------------------------------
     -- Works out the real render frame inside the current viewport.
@@ -114,6 +143,7 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
     fn rcm_draw =
     (
         if not RCM_active do return false
+        if not (rcm_viewAllowed()) do return false
 
         local f    = rcm_field()
         local ox   = f[1]; local oy   = f[2]
@@ -161,13 +191,10 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
             rcm_fillRect cX1  cY0  winX cY1  mc      -- right band
         )
 
-        -- 2) Outline of the render frame (1:1)
-        if RCM_showFrame do rcm_rectOutline X0 Y0 X1 Y1 RCM_frameColor
-
-        -- 3) Outline of the target ratio
+        -- 2) Outline of the target ratio
         rcm_rectOutline cX0 cY0 cX1 cY1 RCM_cropColor
 
-        -- 4) Rule of thirds inside the target ratio
+        -- 3) Rule of thirds inside the target ratio
         if RCM_showThirds do
         (
             gw.setColor #line RCM_cropColor
@@ -182,7 +209,7 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
             )
         )
 
-        -- 5) Ratio label (top left of the target frame)
+        -- 4) Ratio label (top left of the target frame)
         try ( gw.setColor #text RCM_cropColor; gw.wText [cX0 + 6, cY0 + 4, 0] RCM_label ) catch()
 
         gw.enlargeUpdateRect #whole
@@ -199,7 +226,7 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
     ----------------------------------------------------------------------------
     -- Interface
     ----------------------------------------------------------------------------
-    rollout rcmRoll "Ratio Crop Mask" width:200 height:278
+    rollout rcmRoll "Ratio Crop Mask" width:200 height:252
     (
         checkbutton ck_on        "  Enable overlay  "     pos:[8,8]   width:184 height:26  checked:false
 
@@ -219,26 +246,34 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
         checkbutton ck_mask      "Matte"              pos:[8,128]  width:140 height:22 checked:true
         colorPicker cp_mask      ""                   pos:[152,127] width:40 height:21 color:(color 12 12 12)
 
-        checkbutton ck_frame     "Render frame (1:1)" pos:[8,154]  width:140 height:22 checked:true
-        colorPicker cp_frame     ""                   pos:[152,153] width:40 height:21 color:(color 255 220 0)
+        checkbutton ck_thirds    "Rule of thirds"     pos:[8,154]  width:140 height:22 checked:false
+        colorPicker cp_crop      ""                   pos:[152,153] width:40 height:21 color:(color 255 255 255)
 
-        checkbutton ck_thirds    "Rule of thirds"     pos:[8,180]  width:140 height:22 checked:false
-        colorPicker cp_crop      ""                   pos:[152,179] width:40 height:21 color:(color 255 255 255)
+        checkbutton ck_safe      "Max safe frame"     pos:[8,180]  width:184 height:22 checked:false
 
-        checkbutton ck_safe      "Max safe frame"     pos:[8,206]  width:184 height:22 checked:false
-
-        label       lb_info      "Ready."              pos:[8,236]  width:184 height:30
+        label       lb_info      "Ready."              pos:[8,210]  width:184 height:30
 
         ------------------------------------------------------------------
         fn refresh = ( if RCM_active do completeRedraw() )
 
+        -- Reports Max's render lock, which is what pins the overlay to one view.
+        fn lockText =
+        (
+            local t = ""
+            try
+            (
+                if (not rendUseActiveView) and viewport.numViews > 1 do
+                    t = "Locked to viewport " + rendViewIndex as string + "."
+            )
+            catch()
+            t
+        )
+
         fn pushState =
         (
             RCM_showMask   = ck_mask.checked
-            RCM_showFrame  = ck_frame.checked
             RCM_showThirds = ck_thirds.checked
             RCM_maskColor  = cp_mask.color
-            RCM_frameColor = cp_frame.color
             RCM_cropColor  = cp_crop.color
             RCM_offset     = spn_off.value as float
             refresh()
@@ -275,7 +310,8 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
                 displaySafeFrames = true
                 ck_safe.checked = true
                 completeRedraw()
-                lb_info.text = "Overlay on (safe frame ON)."
+                local lt = lockText()
+                lb_info.text = if lt == "" then "Overlay on (safe frame ON)." else ("Overlay on. " + lt)
             )
             else
             (
@@ -321,10 +357,8 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
         on btn_off0  pressed    do ( spn_off.value = 0; RCM_offset = 0.0; refresh() )
 
         on ck_mask   changed st do pushState()
-        on ck_frame  changed st do pushState()
         on ck_thirds changed st do pushState()
         on cp_mask   changed c  do pushState()
-        on cp_frame  changed c  do pushState()
         on cp_crop   changed c  do pushState()
 
         on ck_safe changed st do
