@@ -13,7 +13,8 @@ Three tools so far. Each lives in its own folder with its own README.
 | [**sunpos**](sunpos/) | Places a sun at the real sun's position for a location, date and time, taking the scene's north rotation into account. NOAA maths, no time zone guessing. |
 
 `clonelayers` and `ratiomask` are pure MaxScript, single file, no dependency.
-`sunpos` is a Python panel (`pymxs` + PySide) and ships as a folder.
+`sunpos` is a Python panel and ships as a folder — it runs on what 3ds Max already
+has (`pymxs`, PySide, the Python standard library), so it needs no install either.
 
 ---
 
@@ -35,6 +36,12 @@ Then, **once per tool**: drag its `.ms` into a 3ds Max window (or
 | clonelayers | `clonelayers/aioli-clonelayers.ms` |
 | ratiomask | `ratiomask/aioli-ratiomask.ms` |
 | sunpos | `sunpos/aioli-sunpos.ms` |
+
+**None of the three needs anything installed.** `sunpos` ships an optional
+`setup.bat`, but it is only there for two extras — the `auto` time zone mode (deriving
+the IANA zone from the GPS point) and the command line. Everything else, daylight
+saving included, works straight from the drag & drop. See
+[`sunpos/README.md`](sunpos/README.md#time-zone).
 
 To update later: `git pull` in the clone. That is all — the buttons keep pointing at
 the same files and pick the new version up on the next click.
@@ -74,8 +81,9 @@ Written for **3ds Max 2026**, tested there.
 
 `clonelayers` only uses stable, non-deprecated API (`layermanager`,
 `maxOps.cloneNodes`, native `rollout` UI) and should run on 2016 and up.
-`ratiomask` needs a Nitrous viewport. `sunpos` needs Python 3 with `pymxs` and
-PySide6, with an automatic fallback to PySide2 on older versions.
+`ratiomask` needs a Nitrous viewport. `sunpos` uses the `pymxs` and PySide6 that
+come with 3ds Max 2026, falling back to PySide2 on older versions — nothing to
+install, and Autodesk's Python is never modified.
 
 Renderer-agnostic throughout: none of these tools touch render settings.
 `sunpos` moves whichever sun you point it at — V-Ray Sun, Corona Sun, native
@@ -85,9 +93,11 @@ target light or free directional.
 
 ## Status
 
-All three are **v1.0**. `clonelayers` and `ratiomask` are in production use.
+All three are **v1.0** and installed on the collective's machines: dragged in,
+buttons in place, working.
+
 `sunpos` has 47 automated tests covering the maths and the CLI, but its `pymxs`
-layer has not been exercised in Max yet — see
+layer has not been exercised end to end in Max yet — see
 [`sunpos/NOTES.md`](sunpos/NOTES.md) for the exact list of what is still to be
 checked.
 
@@ -109,6 +119,8 @@ Conventions we hold to:
 - **The macro is a launcher, never a copy of the code.** Bake the path in with
   `getSourceFileName()` at registration time, the way all three do. That is what
   keeps `git pull` meaningful.
+- **Nothing gets installed to use a tool.** Optional extras may ask for a setup
+  step, but the drag & drop path must always work on what 3ds Max already ships.
 - No write to render settings, no write to the source scene beyond what the tool
   is explicitly for. Everything wrapped in a single undo.
 - Design decisions and traps already hit go in the tool's `NOTES.md` — that file
