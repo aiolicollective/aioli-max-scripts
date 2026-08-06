@@ -6,7 +6,7 @@ preview different image ratios **without ever touching the render settings**.
 - **File:** `aioli-ratiomask.ms` — single file, no dependency
 - **Compatibility:** 3ds Max 2026, and earlier versions with a Nitrous viewport
 - **Renderer:** irrelevant (V-Ray, Corona…) — this only draws in the viewport
-- **Version:** 1.2
+- **Version:** 1.3
 
 ---
 
@@ -54,8 +54,6 @@ the `.ms` in once more — see the [root README](../README.md#toolbar-buttons).
 | **Offset** | Shifts the frame on the free axis (vertical in landscape, horizontal in portrait). Expressed as a % of the slack: `0` = centred, `±100` = against an edge. Always clamped to the 1:1 square. |
 | **C** | Recentres the offset (back to 0). |
 | **Matte** | Shows/hides the matte bands, plus a colour picker (default near-black grey). |
-| **Opacity** | Matte density, 5–100 %. See *Opacity* below — it is a screen door, not an alpha. |
-| **F** | Opacity back to 100 %. |
 | **Rule of thirds** | Thirds grid computed **inside the cropped ratio** (exact divisions), plus its colour (default white). |
 | **Safe frame auto** | Lets the tool drive Max's safe frame (see below). Untick it to keep `Shift+F` entirely to yourself. |
 
@@ -103,18 +101,18 @@ viewport towards the 1:1 square — and it does not touch the camera.
 
 ---
 
-## Opacity
+## The matte is solid, and there is no opacity setting
 
-The graphics window has **no alpha and no blend mode**: a colour is always laid
-down at full strength, so the alpha of the colour you pick is ignored. What the
-tool can do is **thin the fill out** — draw one row out of two, out of three… and
-let the image show through the gaps. It reads as a veil; up close it is a screen
-door, not a real transparency.
+The graphics window has **no alpha and no blend mode**: a colour is laid down at
+full strength and the alpha of the colour you pick is ignored. The only way to
+fake transparency is to **thin the fill out** — draw one row in two, in three —
+which v1.2 offered as an `Opacity` slider. It was **removed in v1.3**: in use, a
+solid matte is what the job wants.
 
-A row is kept when `(y * opacity) mod 100 < opacity`, which spreads the kept rows
-evenly instead of drawing a solid block followed by a gap. Row parity is computed
-on absolute screen Y so the four bands stay in phase. Side effect worth having:
-fewer rows means fewer draw calls, so a light matte is cheaper than a solid one.
+If anything the matte still reads slightly translucent at full density, so the
+open question is the opposite one: how to lay down *more* than 100 %. Two things
+to try next time — a second pass of vertical lines over the same rectangle, and
+checking what UI scaling on a high-DPI display does to 1 px lines.
 
 ---
 
@@ -140,14 +138,13 @@ every refresh:
 **Filling the matte:** the graphics window's filled primitives (`gw.wPolygon`,
 `gw.triangle`) turned out to be unstable in Nitrous — missing triangles, stray
 geometry. The matte is therefore painted with **abutting 1 px horizontal lines**
-through `gw.wPolyline`, the only primitive that proved reliable here. At 100 %
-opacity it reads as a solid fill.
+through `gw.wPolyline`, the only primitive that proved reliable here.
 
 ### Code landmarks (for picking this back up)
 
 - State globals: `RCM_active`, `RCM_aspect`, `RCM_label`, `RCM_showMask`,
-  `RCM_maskColor`, `RCM_opacity`, `RCM_showThirds`, `RCM_cropColor`,
-  `RCM_offset`, `RCM_sfAuto`, `RCM_lastVP`.
+  `RCM_maskColor`, `RCM_showThirds`, `RCM_cropColor`, `RCM_offset`,
+  `RCM_sfAuto`, `RCM_lastVP`.
 - Functions: `rcm_viewAllowed()`, `rcm_syncSafeFrame()`, `rcm_field()`,
   `rcm_fillRect`, `rcm_rectOutline`, `rcm_draw` (the callback), `rcm_register` /
   `rcm_unregister`; on the UI side `pushState()`, `lockText()`, `setAspect`,
@@ -164,7 +161,7 @@ opacity it reads as a solid fill.
 
 ## Notes and limits
 
-- **No real transparency**, see *Opacity* above.
+- **No transparency**, see above.
 - **Custom ratios are not persistent** between sessions.
 - **1:1 render expected.** The tool adapts to any render ratio, but it is
   designed around a square render.
@@ -173,7 +170,8 @@ opacity it reads as a solid fill.
 
 ## Ideas
 
-- Persist settings (last ratio, colours, offset, opacity) in an `.ini`.
+- Make the matte read as *fully* opaque (see above).
+- Persist settings (last ratio, colours, offset) in an `.ini`.
 - Grey out the W/H fields outside Custom mode.
 - Several ratios at once (nested outlines, no matte, for comparison).
 - A frame buffer (VFB) version alongside the viewport one.
@@ -182,9 +180,10 @@ opacity it reads as a solid fill.
 
 ## Changelog
 
-- **1.2** — matte **opacity** (5–100 %, simulated by thinning the fill) and
-  **Safe frame auto**: the safe frame follows the viewport the overlay draws in
-  instead of staying on everywhere.
+- **1.3** — the `Opacity` slider is gone: the matte is solid again.
+- **1.2** — matte opacity (simulated by thinning the fill) and **Safe frame
+  auto**: the safe frame follows the viewport the overlay draws in instead of
+  staying on everywhere.
 - **1.1** — the overlay follows Max's render viewport lock instead of hopping to
   whichever viewport you click. Removed the "Render frame (1:1)" outline toggle
   and its colour picker (the matte already reads the render square).
