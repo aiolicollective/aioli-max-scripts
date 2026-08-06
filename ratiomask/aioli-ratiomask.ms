@@ -1,5 +1,5 @@
 /***************************************************************************************
-    aioli-ratiomask  (Aioli Ratio Mask)  -  v1.1
+    aioli-ratiomask  (Aioli Ratio Mask)  -  v1.2
     --------------------------------------------------------------------------------
     For 3ds Max 2026 (works on earlier versions with Nitrous too).
 
@@ -24,6 +24,14 @@
       overlay only shows in the viewport that will actually be rendered and stays
       hidden in the others. Lock open -> old behaviour, it follows the active view.
 
+    SAFE FRAME :
+      displaySafeFrames is a single global flag - MAXScript has no per-viewport
+      safe frame - so the tool toggles it WHEN THE ACTIVE VIEWPORT CHANGES: on
+      when you enter the viewport the overlay draws in, off when you leave it.
+      It is left alone in between, so a manual Shift+F in another viewport holds
+      until the next viewport change. Untick "Safe frame auto" and the tool never
+      writes to it again.
+
     INSTALLATION :
       Scripting > Run Script... (or drag the .ms into the viewport).
       A "Ratio Crop Mask" window opens. Tick "Enable overlay".
@@ -44,9 +52,12 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
     global RCM_label       = "16:9"
     global RCM_showMask    = true
     global RCM_maskColor   = (color 12 12 12)    -- matte colour (near black)
+    global RCM_opacity     = 100                 -- matte density in % (see rcm_fillRect)
     global RCM_showThirds  = false
     global RCM_cropColor   = (color 255 255 255) -- ratio outline + thirds colour
     global RCM_offset      = 0.0                  -- frame offset on the free axis (-100..100)
+    global RCM_sfAuto      = true                -- tool drives Max's safe frame
+    global RCM_lastVP      = -1                  -- last active viewport seen by the callback
 
     ----------------------------------------------------------------------------
     -- Ratio presets :  label  ->  aspect (W/H)
@@ -76,6 +87,31 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
         )
         catch()
         ok
+    )
+
+    ----------------------------------------------------------------------------
+    -- Safe frame follows the overlay.
+    --
+    -- displaySafeFrames is a GLOBAL flag: MAXScript exposes no per-viewport safe
+    -- frame, so the best we can do is flip it when the active viewport changes -
+    -- on when you enter the viewport the overlay draws in, off when you leave.
+    -- Acting only on a change is what makes a manual Shift+F elsewhere stick:
+    -- between two viewport changes we never write to the flag.
+    -- Writing it triggers another redraw, but by then RCM_lastVP already matches
+    -- the active viewport, so the second pass writes nothing and it settles.
+    ----------------------------------------------------------------------------
+    fn rcm_syncSafeFrame allowed =
+    (
+        if RCM_sfAuto do
+        (
+            local vp = -1
+            try (vp = viewport.activeViewport) catch()
+            if vp != RCM_lastVP do
+            (
+                RCM_lastVP = vp
+                if displaySafeFrames != allowed do displaySafeFrames = allowed
+            )
+        )
     )
 
     ----------------------------------------------------------------------------
@@ -110,21 +146,40 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
     )
 
     ----------------------------------------------------------------------------
-    -- Filled rectangle (opaque matte) in screen coordinates.
+    -- Filled rectangle (the matte) in screen coordinates.
+    --
+    -- Reliable fill: tightly packed horizontal lines (1 px). gw.wPolyline is the
+    -- only primitive that is really stable in Nitrous.
+    --
+    -- OPACITY: the graphics window has no alpha and no blend mode, so a colour is
+    -- always laid down at full strength. What we can do is THIN THE FILL OUT and
+    -- let the viewport show through the gaps - a screen door, not a real alpha.
+    -- A row is kept when (y * opacity) mod 100 < opacity, which spreads the kept
+    -- rows evenly instead of drawing a solid block then a gap. Row parity is
+    -- computed on absolute screen Y so the four bands stay in phase.
     ----------------------------------------------------------------------------
     fn rcm_fillRect x0 y0 x1 y1 clr =
     (
-        -- Reliable fill: tightly packed horizontal lines (1 px).
-        -- gw.wPolyline is the only primitive that is really stable in Nitrous.
         local ix0 = x0 as integer
         local ix1 = x1 as integer
         local iy0 = y0 as integer
         local iy1 = y1 as integer
+        local op  = RCM_opacity
+        if op > 100 do op = 100
+        if op < 1 do op = 1
         if ix1 > ix0 and iy1 > iy0 do
         (
             gw.setColor #line clr
-            for yy = iy0 to iy1 do
-                gw.wPolyline #([ix0, yy, 0], [ix1, yy, 0]) false
+            if op >= 100 then
+            (
+                for yy = iy0 to iy1 do
+                    gw.wPolyline #([ix0, yy, 0], [ix1, yy, 0]) false
+            )
+            else
+            (
+                for yy = iy0 to iy1 where (mod (yy * op) 100) < op do
+                    gw.wPolyline #([ix0, yy, 0], [ix1, yy, 0]) false
+            )
         )
     )
 
@@ -143,7 +198,10 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
     fn rcm_draw =
     (
         if not RCM_active do return false
-        if not (rcm_viewAllowed()) do return false
+
+        local allowed = rcm_viewAllowed()
+        rcm_syncSafeFrame allowed
+        if not allowed do return false
 
         local f    = rcm_field()
         local ox   = f[1]; local oy   = f[2]
@@ -226,7 +284,7 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
     ----------------------------------------------------------------------------
     -- Interface
     ----------------------------------------------------------------------------
-    rollout rcmRoll "Ratio Crop Mask" width:200 height:252
+    rollout rcmRoll "Ratio Crop Mask" width:200 height:278
     (
         checkbutton ck_on        "  Enable overlay  "     pos:[8,8]   width:184 height:26  checked:false
 
@@ -246,12 +304,17 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
         checkbutton ck_mask      "Matte"              pos:[8,128]  width:140 height:22 checked:true
         colorPicker cp_mask      ""                   pos:[152,127] width:40 height:21 color:(color 12 12 12)
 
-        checkbutton ck_thirds    "Rule of thirds"     pos:[8,154]  width:140 height:22 checked:false
-        colorPicker cp_crop      ""                   pos:[152,153] width:40 height:21 color:(color 255 255 255)
+        spinner     spn_opa      "Opacity"  pos:[8,154] width:150 range:[5,100,100] type:#integer \
+                    tooltip:"Matte density. No alpha in the viewport, so lower values simply draw fewer lines and let the image show through (screen door). 100 = solid."
+        button      btn_opa100   "F"  pos:[170,153] width:22 height:18  tooltip:"Back to 100%"
 
-        checkbutton ck_safe      "Max safe frame"     pos:[8,180]  width:184 height:22 checked:false
+        checkbutton ck_thirds    "Rule of thirds"     pos:[8,180]  width:140 height:22 checked:false
+        colorPicker cp_crop      ""                   pos:[152,179] width:40 height:21 color:(color 255 255 255)
 
-        label       lb_info      "Ready."              pos:[8,210]  width:184 height:30
+        checkbutton ck_safe      "Safe frame auto"    pos:[8,206]  width:184 height:22 checked:true \
+                    tooltip:"On: the safe frame is turned on in the viewport the overlay draws in and off when you leave it (it is a global flag in Max, there is no per-viewport setting). Off: the tool never touches it, use Shift+F yourself."
+
+        label       lb_info      "Ready."              pos:[8,236]  width:184 height:30
 
         ------------------------------------------------------------------
         fn refresh = ( if RCM_active do completeRedraw() )
@@ -276,6 +339,8 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
             RCM_maskColor  = cp_mask.color
             RCM_cropColor  = cp_crop.color
             RCM_offset     = spn_off.value as float
+            RCM_opacity    = spn_opa.value
+            RCM_sfAuto     = ck_safe.checked
             refresh()
         )
 
@@ -305,13 +370,12 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
             (
                 pushState()
                 rcm_register()
-                -- Safe frame required: the overlay lines up with the render area,
-                -- which Max only displays properly when the safe frame is on.
-                displaySafeFrames = true
-                ck_safe.checked = true
+                -- Forget the last known viewport so the first redraw sets the
+                -- safe frame for wherever we are right now.
+                RCM_lastVP = -1
                 completeRedraw()
                 local lt = lockText()
-                lb_info.text = if lt == "" then "Overlay on (safe frame ON)." else ("Overlay on. " + lt)
+                lb_info.text = if lt == "" then "Overlay on." else ("Overlay on. " + lt)
             )
             else
             (
@@ -356,6 +420,9 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
         on spn_off   changed v  do ( RCM_offset = v as float; refresh() )
         on btn_off0  pressed    do ( spn_off.value = 0; RCM_offset = 0.0; refresh() )
 
+        on spn_opa    changed v do ( RCM_opacity = v; refresh() )
+        on btn_opa100 pressed   do ( spn_opa.value = 100; RCM_opacity = 100; refresh() )
+
         on ck_mask   changed st do pushState()
         on ck_thirds changed st do pushState()
         on cp_mask   changed c  do pushState()
@@ -363,14 +430,16 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
 
         on ck_safe changed st do
         (
-            displaySafeFrames = st
-            if RCM_active and (not st) then
-                lb_info.text = "Careful: without the safe frame the overlay is no longer aligned."
-            else if st then
-                lb_info.text = "Safe frame ON."
+            RCM_sfAuto = st
+            if st then
+            (
+                -- Take over again from wherever we are.
+                RCM_lastVP = -1
+                lb_info.text = "Safe frame follows the overlay."
+                completeRedraw()
+            )
             else
-                lb_info.text = "Safe frame OFF."
-            completeRedraw()
+                lb_info.text = "Safe frame is yours (Shift+F). Without it the overlay is not aligned."
         )
 
         ------------------------------------------------------------------
