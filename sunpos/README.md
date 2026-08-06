@@ -15,9 +15,9 @@ right: shadow studies, golden hour, the sun's path across a day.
 
 **Drag `aioli-sunpos.ms` into a 3ds Max window.** The panel opens. That is all —
 nothing to install. The panel runs on `pymxs`, PySide and the Python standard
-library, all of which ship with 3ds Max. The optional `setup.bat` further down is
-only needed for the `auto` time zone mode and the command line; **everything else,
-daylight saving included, works from the drag & drop alone.**
+library, all of which ship with 3ds Max. **Everything the panel does, daylight
+saving included, works from the drag & drop alone** — except the `auto` time zone
+mode, which is optional and covered below.
 
 For a **permanent toolbar button** (once and for all):
 `Customize > Customize User Interface…`, **Toolbars** tab, category
@@ -81,22 +81,37 @@ Your settings are remembered between sessions.
 | `manual` | raw UTC offset, for a place not in the list | none |
 | `auto` | IANA database, derived from the GPS point | `setup.bat` once |
 
-Only `auto` needs the setup step, and only because deriving a zone from GPS
-coordinates requires border data. `zone` and `manual` cover nearly every job.
+**`zone` and `manual` cover nearly every job**, and they are the whole of what the
+panel needs. `auto` exists for the one case they do not cover: not knowing which
+zone a GPS point falls in, which requires border data.
+
+> **What `auto` looks like without the install.** It is always listed in the
+> **Time zone mode** drop-down — `setup.bat` does not make it *appear*, it makes
+> it *work*. With no `.venv` next to this file:
+> - the panel says so in its log on startup
+>   (`'auto' unavailable (no .venv)…`);
+> - selecting `auto` and hitting **Place sun** prints an explicit message and
+>   **stops there** — nothing is computed, nothing in the scene is touched.
+>
+> So leaving it alone costs nothing. Stay in `zone`.
+
+> **Is the offline table trustworthy?** It is a snapshot of DST rules (34 zones,
+> cross-checked against `tzdata` by the test suite on 24 dates per zone). It is
+> correct today, but a country changing its law makes it silently stale — and
+> zones with unstable rules (Cairo, Casablanca, Jerusalem) are deliberately
+> **absent** rather than approximated, so you cannot pick a wrong one by accident.
+> For a date you are committing to with a client, read the zone line the log
+> prints (`Europe/Paris (CEST, UTC+2, DST, offline table)`) and check that offset
+> against any public source; if it disagrees, `manual` mode takes the right offset
+> directly. `auto` (IANA, always current) automates that check — a convenience,
+> not a prerequisite.
 
 The log always states what was used, for instance
 `Australia/Sydney (AEST, UTC+10, standard, offline table)`.
 
-> **`zone` or `auto`?** The offline table is a snapshot of DST rules (34 zones,
-> cross-checked against `tzdata` by the test suite). It is correct today, but a
-> country changing its law makes it silently stale — and zones with unstable
-> rules (Cairo, Casablanca, Jerusalem) are deliberately **absent** rather than
-> approximated. `auto` mode reads the IANA database, always current. **For a date
-> you are committing to with a client, use `auto`.**
->
-> `auto` mode installs **nothing** into 3ds Max: the panel delegates that one
-> question to the Python in this folder's `.venv` (see below). Autodesk's Python
-> is never modified.
+`auto` mode installs **nothing** into 3ds Max: the panel delegates that one
+question to the Python in this folder's `.venv` (see below). Autodesk's Python is
+never modified.
 
 ### Atmospheric refraction
 
@@ -139,8 +154,7 @@ With these caveats:
 **Validity ranges.** The NOAA equations hold ~0.01° between **1800 and 2100**;
 beyond that the result degrades by a few arcminutes per century and the tool says
 so. The offline zone table is only valid from the year each rule took its current
-form (EU 2002, US 2007, AU 2008, NZ 2007) — before that it says so and points you
-at `auto`.
+form (EU 2002, US 2007, AU 2008, NZ 2007) — before that it says so.
 
 **A defensible way to put it**: "position computed with the NOAA algorithm,
 corrected for standard atmospheric refraction, accurate to better than 0.05°
@@ -164,9 +178,10 @@ correct, both of which are verifiable on the report".
 
 ## Use outside 3ds Max *(optional)*
 
-Nothing below is needed for the 3ds Max panel. It buys two things: the `auto`
-time zone mode, and the calculation on the command line — to automate it or reuse
-it in another 3D application.
+**This is what `setup.bat` is mostly for.** None of it is needed by the 3ds Max
+panel. It buys two things: the calculation **on the command line** — to automate
+it, or to feed another 3D application (Blender, Houdini, a spreadsheet through
+`--json`) — and, as a side effect, the `auto` time zone mode inside the panel.
 
 ### Install
 
@@ -177,8 +192,8 @@ setup.bat            REM Windows
 
 Creates a **`.venv` inside this folder** and installs the two dependencies
 (`timezonefinder`, `tzdata`). **Nothing is installed into your system Python**,
-nothing is added to `PATH`. To uninstall: delete `.venv`. Requires Python ≥ 3.9.
-The test suite runs at the end.
+nothing is added to `PATH`, nothing goes into 3ds Max. To uninstall: delete
+`.venv`. Requires Python ≥ 3.9. The test suite runs at the end.
 
 ### Command line
 
