@@ -25,7 +25,7 @@ carrying the modified name, and the chain of parents is rebuilt **recursively**.
 ## Install and run
 
 Drag `aioli-clonelayers.ms` into a 3ds Max window, or `Scripting > Run Script…`.
-The panel opens and a macro is registered under the **`aioli`** category
+The panel opens and a macro is registered under the **`aiolicollective`** category
 (action `clonelayers`) for a toolbar button or a keyboard shortcut.
 
 The path to this file is baked into the macro when you drag it in, so the button

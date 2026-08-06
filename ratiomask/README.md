@@ -29,7 +29,7 @@ Drag `aioli-ratiomask.ms` into a 3ds Max window, or `Scripting > Run Script…`.
 A "Ratio Crop Mask" window opens.
 
 For a permanent button: `Customize > Customize User Interface > Toolbars`,
-category **`aioli`**, drag the **ratiomask** action onto a toolbar.
+category **`aiolicollective`**, drag the **ratiomask** action onto a toolbar.
 
 The path to this file is baked into the macro when you drag it in, so the button
 survives a restart of Max and follows `git pull`. Move the clone and you just drag
