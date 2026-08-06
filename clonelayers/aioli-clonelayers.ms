@@ -8,7 +8,7 @@
 	Version  : 1.0
 	Compat.  : 3ds Max 2016 -> 2026+ (layermanager / maxOps.cloneNodes API)
 	Usage    : Scripting > Run Script. The script registers itself in
-	           Customize User Interface, category "aioli", action
+	           Customize User Interface, category "aiolicollective", action
 	           "clonelayers" (toolbar, menu, quad or keyboard shortcut).
 
 	Based on an original script that only walked up one level of parent.
@@ -575,7 +575,7 @@ global aioli_clonelayers_open   -- entry point called by the macroScript
 
 ------------------------------------------------------------------------
 -- MACROSCRIPT REGISTRATION
--- Creates the "clonelayers" entry in the "aioli" category of
+-- Creates the "clonelayers" entry in the "aiolicollective" category of
 -- Customize > Customize User Interface (Toolbars, Menus, Quads and
 -- Keyboard tabs). Evaluating this block is enough: 3ds Max writes the
 -- matching .mcr into its usermacros folder itself, so the entry stays
@@ -597,7 +597,7 @@ global aioli_clonelayers_open   -- entry point called by the macroScript
 		thisFile = (getDir #userScripts) + "\\aioli\\clonelayers\\aioli-clonelayers.ms"
 
 	local src = ""
-	src += "macroScript aioli_clonelayers category:\"aioli\" buttonText:\"clonelayers\" "
+	src += "macroScript aioli_clonelayers category:\"aiolicollective\" buttonText:\"clonelayers\" "
 	src += "toolTip:\"aioli-clonelayers - clone and rebuild the layer tree\"\n"
 	src += "(\n"
 	src += "    on execute do\n"
@@ -622,9 +622,9 @@ global aioli_clonelayers_open   -- entry point called by the macroScript
 	src += ")\n"
 	execute src
 
-	format "[aioli-clonelayers] macro \"clonelayers\" registered (category \"aioli\")\n"
+	format "[aioli-clonelayers] macro \"clonelayers\" registered (category \"aiolicollective\")\n"
 	format "[aioli-clonelayers] script : %\n" thisFile
-	format "[aioli-clonelayers] button : Customize > Customize User Interface > Toolbars > Category \"aioli\"\n"
+	format "[aioli-clonelayers] button : Customize > Customize User Interface > Toolbars > Category \"aiolicollective\"\n"
 )
 
 ------------------------------------------------------------------------
