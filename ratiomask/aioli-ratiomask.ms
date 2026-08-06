@@ -21,7 +21,7 @@
       Scripting > Run Script... (or drag the .ms into the viewport).
       A "Ratio Crop Mask" window opens. Tick "Enable overlay".
       (Optional) For a permanent button: Customize > Customize User Interface >
-      category "aioli" > macro "ratiomask", drag it onto a toolbar.
+      category "aiolicollective" > macro "ratiomask", drag it onto a toolbar.
 
     Overlay mechanism inspired by Image Comp Helper (Warren Wnuk / C. Buelter).
 ***************************************************************************************/
@@ -371,7 +371,7 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
 
 ------------------------------------------------------------------------
 -- MACROSCRIPT REGISTRATION
--- Creates the "ratiomask" entry in the "aioli" category of
+-- Creates the "ratiomask" entry in the "aiolicollective" category of
 -- Customize > Customize User Interface. Evaluating this block is enough:
 -- 3ds Max writes the matching .mcr into its usermacros folder itself, so
 -- the entry stays available on the next startups.
@@ -392,7 +392,7 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
         thisFile = (getDir #userScripts) + "\\aioli\\ratiomask\\aioli-ratiomask.ms"
 
     local src = ""
-    src += "macroScript aioli_ratiomask category:\"aioli\" buttonText:\"ratiomask\" "
+    src += "macroScript aioli_ratiomask category:\"aiolicollective\" buttonText:\"ratiomask\" "
     src += "toolTip:\"aioli-ratiomask - viewport crop-ratio matte\"\n"
     src += "(\n"
     src += "    on execute do\n"
@@ -417,9 +417,9 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
     src += ")\n"
     execute src
 
-    format "[aioli-ratiomask] macro \"ratiomask\" registered (category \"aioli\")\n"
+    format "[aioli-ratiomask] macro \"ratiomask\" registered (category \"aiolicollective\")\n"
     format "[aioli-ratiomask] script : %\n" thisFile
-    format "[aioli-ratiomask] button : Customize > Customize User Interface > Toolbars > Category \"aioli\"\n"
+    format "[aioli-ratiomask] button : Customize > Customize User Interface > Toolbars > Category \"aiolicollective\"\n"
 )
 
 ------------------------------------------------------------------------
