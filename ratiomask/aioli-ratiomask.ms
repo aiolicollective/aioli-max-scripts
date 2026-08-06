@@ -1,5 +1,5 @@
 /***************************************************************************************
-    aioli-ratiomask  (Aioli Ratio Mask)  -  v1.2
+    aioli-ratiomask  (Aioli Ratio Mask)  -  v1.3
     --------------------------------------------------------------------------------
     For 3ds Max 2026 (works on earlier versions with Nitrous too).
 
@@ -52,7 +52,6 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
     global RCM_label       = "16:9"
     global RCM_showMask    = true
     global RCM_maskColor   = (color 12 12 12)    -- matte colour (near black)
-    global RCM_opacity     = 100                 -- matte density in % (see rcm_fillRect)
     global RCM_showThirds  = false
     global RCM_cropColor   = (color 255 255 255) -- ratio outline + thirds colour
     global RCM_offset      = 0.0                  -- frame offset on the free axis (-100..100)
@@ -149,14 +148,17 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
     -- Filled rectangle (the matte) in screen coordinates.
     --
     -- Reliable fill: tightly packed horizontal lines (1 px). gw.wPolyline is the
-    -- only primitive that is really stable in Nitrous.
+    -- only primitive that is really stable in Nitrous - the filled ones
+    -- (gw.wPolygon, gw.triangle) drop triangles and leave stray geometry.
     --
-    -- OPACITY: the graphics window has no alpha and no blend mode, so a colour is
-    -- always laid down at full strength. What we can do is THIN THE FILL OUT and
-    -- let the viewport show through the gaps - a screen door, not a real alpha.
-    -- A row is kept when (y * opacity) mod 100 < opacity, which spreads the kept
-    -- rows evenly instead of drawing a solid block then a gap. Row parity is
-    -- computed on absolute screen Y so the four bands stay in phase.
+    -- No opacity control here, on purpose. v1.2 added one by thinning the fill
+    -- out (drawing one row in two, in three...) since the graphics window has no
+    -- alpha and no blend mode; it was dropped in v1.3 because a solid matte is
+    -- what the job actually wants. If anything, the matte still reads slightly
+    -- translucent at full density - the open question is how to draw MORE than
+    -- 100%, not less. Worth trying next time: a second pass of vertical lines
+    -- over the same rectangle, and checking how UI scaling on a high-DPI display
+    -- affects 1 px lines.
     ----------------------------------------------------------------------------
     fn rcm_fillRect x0 y0 x1 y1 clr =
     (
@@ -164,22 +166,11 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
         local ix1 = x1 as integer
         local iy0 = y0 as integer
         local iy1 = y1 as integer
-        local op  = RCM_opacity
-        if op > 100 do op = 100
-        if op < 1 do op = 1
         if ix1 > ix0 and iy1 > iy0 do
         (
             gw.setColor #line clr
-            if op >= 100 then
-            (
-                for yy = iy0 to iy1 do
-                    gw.wPolyline #([ix0, yy, 0], [ix1, yy, 0]) false
-            )
-            else
-            (
-                for yy = iy0 to iy1 where (mod (yy * op) 100) < op do
-                    gw.wPolyline #([ix0, yy, 0], [ix1, yy, 0]) false
-            )
+            for yy = iy0 to iy1 do
+                gw.wPolyline #([ix0, yy, 0], [ix1, yy, 0]) false
         )
     )
 
@@ -284,7 +275,7 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
     ----------------------------------------------------------------------------
     -- Interface
     ----------------------------------------------------------------------------
-    rollout rcmRoll "Ratio Crop Mask" width:200 height:278
+    rollout rcmRoll "Ratio Crop Mask" width:200 height:252
     (
         checkbutton ck_on        "  Enable overlay  "     pos:[8,8]   width:184 height:26  checked:false
 
@@ -304,17 +295,13 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
         checkbutton ck_mask      "Matte"              pos:[8,128]  width:140 height:22 checked:true
         colorPicker cp_mask      ""                   pos:[152,127] width:40 height:21 color:(color 12 12 12)
 
-        spinner     spn_opa      "Opacity"  pos:[8,154] width:150 range:[5,100,100] type:#integer \
-                    tooltip:"Matte density. No alpha in the viewport, so lower values simply draw fewer lines and let the image show through (screen door). 100 = solid."
-        button      btn_opa100   "F"  pos:[170,153] width:22 height:18  tooltip:"Back to 100%"
+        checkbutton ck_thirds    "Rule of thirds"     pos:[8,154]  width:140 height:22 checked:false
+        colorPicker cp_crop      ""                   pos:[152,153] width:40 height:21 color:(color 255 255 255)
 
-        checkbutton ck_thirds    "Rule of thirds"     pos:[8,180]  width:140 height:22 checked:false
-        colorPicker cp_crop      ""                   pos:[152,179] width:40 height:21 color:(color 255 255 255)
-
-        checkbutton ck_safe      "Safe frame auto"    pos:[8,206]  width:184 height:22 checked:true \
+        checkbutton ck_safe      "Safe frame auto"    pos:[8,180]  width:184 height:22 checked:true \
                     tooltip:"On: the safe frame is turned on in the viewport the overlay draws in and off when you leave it (it is a global flag in Max, there is no per-viewport setting). Off: the tool never touches it, use Shift+F yourself."
 
-        label       lb_info      "Ready."              pos:[8,236]  width:184 height:30
+        label       lb_info      "Ready."              pos:[8,210]  width:184 height:30
 
         ------------------------------------------------------------------
         fn refresh = ( if RCM_active do completeRedraw() )
@@ -339,7 +326,6 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
             RCM_maskColor  = cp_mask.color
             RCM_cropColor  = cp_crop.color
             RCM_offset     = spn_off.value as float
-            RCM_opacity    = spn_opa.value
             RCM_sfAuto     = ck_safe.checked
             refresh()
         )
@@ -419,9 +405,6 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
 
         on spn_off   changed v  do ( RCM_offset = v as float; refresh() )
         on btn_off0  pressed    do ( spn_off.value = 0; RCM_offset = 0.0; refresh() )
-
-        on spn_opa    changed v do ( RCM_opacity = v; refresh() )
-        on btn_opa100 pressed   do ( spn_opa.value = 100; RCM_opacity = 100; refresh() )
 
         on ck_mask   changed st do pushState()
         on ck_thirds changed st do pushState()
