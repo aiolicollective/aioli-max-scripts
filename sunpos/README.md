@@ -14,7 +14,10 @@ right: shadow studies, golden hour, the sun's path across a day.
 ## Getting started in 3ds Max
 
 **Drag `aioli-sunpos.ms` into a 3ds Max window.** The panel opens. That is all —
-nothing to install.
+nothing to install. The panel runs on `pymxs`, PySide and the Python standard
+library, all of which ship with 3ds Max. The optional `setup.bat` further down is
+only needed for the `auto` time zone mode and the command line; **everything else,
+daylight saving included, works from the drag & drop alone.**
 
 For a **permanent toolbar button** (once and for all):
 `Customize > Customize User Interface…`, **Toolbars** tab, category
@@ -68,14 +71,18 @@ somebody else's work.
 ### Time zone
 
 The panel starts in **`zone`** mode on `Europe/Paris`: usable straight away, with
-nothing to install, **daylight saving included**. Your settings are remembered
-between sessions.
+nothing to install, **daylight saving included** — pick your zone once and the
+tool applies its summer/winter rule to whatever date you type.
+Your settings are remembered between sessions.
 
 | mode | source | install |
 |---|---|---|
 | **`zone`** *(default)* | drop-down list, the zone's published DST rule | none |
 | `manual` | raw UTC offset, for a place not in the list | none |
 | `auto` | IANA database, derived from the GPS point | `setup.bat` once |
+
+Only `auto` needs the setup step, and only because deriving a zone from GPS
+coordinates requires border data. `zone` and `manual` cover nearly every job.
 
 The log always states what was used, for instance
 `Australia/Sydney (AEST, UTC+10, standard, offline table)`.
@@ -157,8 +164,9 @@ correct, both of which are verifiable on the report".
 
 ## Use outside 3ds Max *(optional)*
 
-The calculation is available from the command line, to automate it or reuse it in
-another 3D application.
+Nothing below is needed for the 3ds Max panel. It buys two things: the `auto`
+time zone mode, and the calculation on the command line — to automate it or reuse
+it in another 3D application.
 
 ### Install
 
@@ -171,8 +179,6 @@ Creates a **`.venv` inside this folder** and installs the two dependencies
 (`timezonefinder`, `tzdata`). **Nothing is installed into your system Python**,
 nothing is added to `PATH`. To uninstall: delete `.venv`. Requires Python ≥ 3.9.
 The test suite runs at the end.
-
-This same install is what enables the `auto` time zone mode in the 3ds Max panel.
 
 ### Command line
 
