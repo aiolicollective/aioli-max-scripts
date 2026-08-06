@@ -28,7 +28,7 @@ into 3ds Max, and nothing is written outside Max's own preferences.
 
 Then, **once per tool**: drag its `.ms` into a 3ds Max window (or
 `Scripting > Run Script…`). The panel opens, and a macro is registered under the
-**`aioli`** category.
+**`aiolicollective`** category.
 
 | Tool | File to drag in |
 |---|---|
@@ -43,15 +43,15 @@ the same files and pick the new version up on the next click.
 
 ## Toolbar buttons
 
-`Customize > Customize User Interface…` > **Toolbars** tab > Category **`aioli`** >
-drag the action onto a toolbar. The same three actions are available in the Menus,
-Quads and Keyboard tabs.
+`Customize > Customize User Interface…` > **Toolbars** tab > Category
+**`aiolicollective`** > drag the action onto a toolbar. The same three actions are
+available in the Menus, Quads and Keyboard tabs.
 
 | Category | Action | Macro |
 |---|---|---|
-| `aioli` | `clonelayers` | `aioli_clonelayers` |
-| `aioli` | `ratiomask` | `aioli_ratiomask` |
-| `aioli` | `sunpos` | `aioli_sunpos` |
+| `aiolicollective` | `clonelayers` | `aioli_clonelayers` |
+| `aiolicollective` | `ratiomask` | `aioli_ratiomask` |
+| `aiolicollective` | `sunpos` | `aioli_sunpos` |
 
 All three behave the same way, on purpose:
 
@@ -103,9 +103,9 @@ row in the tables above.
 Conventions we hold to:
 
 - **The repo is in English**, docs and code alike. Public repo, shared tools.
-- One macro category, `aioli`, for every tool. Action named after the tool, macro
-  named `aioli_<tool>`, file named `aioli-<tool>.ms` — so a tool is recognisable
-  wherever you meet it.
+- One macro category, `aiolicollective`, for every tool. Action named after the
+  tool, macro named `aioli_<tool>`, file named `aioli-<tool>.ms` — so a tool is
+  recognisable wherever you meet it.
 - **The macro is a launcher, never a copy of the code.** Bake the path in with
   `getSourceFileName()` at registration time, the way all three do. That is what
   keeps `git pull` meaningful.
