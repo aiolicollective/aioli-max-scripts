@@ -37,9 +37,10 @@ Then, **once per tool**: drag its `.ms` into a 3ds Max window (or
 | ratiomask | `ratiomask/aioli-ratiomask.ms` |
 | sunpos | `sunpos/aioli-sunpos.ms` |
 
-**None of the three needs anything installed.** `sunpos` ships an optional
-`setup.bat`, but it is only there for two extras — the `auto` time zone mode (deriving
-the IANA zone from the GPS point) and the command line. Everything else, daylight
+**None of the three needs anything installed in order to be used in 3ds Max.**
+`sunpos` ships an optional `setup.bat`, but that is for running the calculation
+**outside** Max — on the command line, or to feed another 3D application. It also
+unlocks the `auto` time zone mode inside the panel; everything else there, daylight
 saving included, works straight from the drag & drop. See
 [`sunpos/README.md`](sunpos/README.md#time-zone).
 
@@ -93,8 +94,9 @@ target light or free directional.
 
 ## Status
 
-All three are **v1.0** and installed on the collective's machines: dragged in,
-buttons in place, working.
+All three are installed on the collective's machines: dragged in, buttons in
+place, working. `clonelayers` and `sunpos` are at **v1.0**, `ratiomask` at
+**v1.3** — see its [changelog](ratiomask/README.md#changelog).
 
 `sunpos` has 47 automated tests covering the maths and the CLI, but its `pymxs`
 layer has not been exercised end to end in Max yet — see
