@@ -6,7 +6,7 @@ preview different image ratios **without ever touching the render settings**.
 - **File:** `aioli-ratiomask.ms` — single file, no dependency
 - **Compatibility:** 3ds Max 2026, and earlier versions with a Nitrous viewport
 - **Renderer:** irrelevant (V-Ray, Corona…) — this only draws in the viewport
-- **Version:** 1.1
+- **Version:** 1.2
 
 ---
 
@@ -41,21 +41,23 @@ the `.ms` in once more — see the [root README](../README.md#toolbar-buttons).
 
 1. Get into the camera view (or perspective).
 2. Tick **Enable overlay** — the viewport switches to safe frame display (see
-   *Notes*) and the matte appears.
+   *Safe frame*) and the matte appears.
 3. Pick a ratio from the list, or **Custom** for a free one.
 4. Adjust **Offset** if you want the frame off-centre.
 
 | Control | Role |
 |---|---|
-| **Enable overlay** | Turns the display on and off. Also turns Max's safe frame on. |
+| **Enable overlay** | Turns the display on and off. |
 | **Ratio** (list) | Crop ratio: fixed presets plus a **Custom** entry. |
 | **Flip** | Swaps the orientation (16:9 ↔ 9:16, 4:5 ↔ 5:4…). Falls back to Custom when no preset matches. |
 | **W / H** | Width / height of the **Custom** ratio. Live only while "Custom" is selected. |
 | **Offset** | Shifts the frame on the free axis (vertical in landscape, horizontal in portrait). Expressed as a % of the slack: `0` = centred, `±100` = against an edge. Always clamped to the 1:1 square. |
 | **C** | Recentres the offset (back to 0). |
 | **Matte** | Shows/hides the matte bands, plus a colour picker (default near-black grey). |
+| **Opacity** | Matte density, 5–100 %. See *Opacity* below — it is a screen door, not an alpha. |
+| **F** | Opacity back to 100 %. |
 | **Rule of thirds** | Thirds grid computed **inside the cropped ratio** (exact divisions), plus its colour (default white). |
-| **Max safe frame** | Mirrors and drives Max's native safe frame. |
+| **Safe frame auto** | Lets the tool drive Max's safe frame (see below). Untick it to keep `Shift+F` entirely to yourself. |
 
 ---
 
@@ -81,13 +83,49 @@ the locked index when you enable the overlay.
 
 ---
 
+## Safe frame
+
+The overlay lines up with the render area, which Max only displays correctly when
+the safe frame is on. But `displaySafeFrames` is a **single global flag** —
+MAXScript exposes no per-viewport safe frame — so turning it on for the locked
+view turns it on everywhere.
+
+With **Safe frame auto** ticked (the default) the tool flips that flag **when the
+active viewport changes**: on when you enter the viewport the overlay draws in,
+off when you leave it. Between two viewport changes it never writes to the flag,
+so a manual `Shift+F` in another viewport holds until you switch viewports again.
+
+Untick it and the tool stops writing to `displaySafeFrames` altogether. Bear in
+mind the overlay is only aligned while the safe frame is on.
+
+The "rezoom" you see when the safe frame comes on is normal — Max letterboxes the
+viewport towards the 1:1 square — and it does not touch the camera.
+
+---
+
+## Opacity
+
+The graphics window has **no alpha and no blend mode**: a colour is always laid
+down at full strength, so the alpha of the colour you pick is ignored. What the
+tool can do is **thin the fill out** — draw one row out of two, out of three… and
+let the image show through the gaps. It reads as a veil; up close it is a screen
+door, not a real transparency.
+
+A row is kept when `(y * opacity) mod 100 < opacity`, which spreads the kept rows
+evenly instead of drawing a solid block followed by a gap. Row parity is computed
+on absolute screen Y so the four bands stay in phase. Side effect worth having:
+fewer rows means fewer draw calls, so a light matte is cheaper than a solid one.
+
+---
+
 ## How it works
 
 A **redraw callback** (`registerRedrawViewsCallback`) paints over the viewport on
 every refresh:
 
 1. `rcm_viewAllowed()` decides whether this viewport is the one to draw in (see
-   above); if not, the callback bails out at once.
+   above), `rcm_syncSafeFrame()` aligns the safe frame with that answer, and the
+   callback bails out at once if this is not the viewport.
 2. `rcm_field()` works out, in screen pixels, the rectangle matching the render
    area inside the viewport — same logic as the safe frame. On a 1:1 render, that
    is a centred square.
@@ -102,17 +140,22 @@ every refresh:
 **Filling the matte:** the graphics window's filled primitives (`gw.wPolygon`,
 `gw.triangle`) turned out to be unstable in Nitrous — missing triangles, stray
 geometry. The matte is therefore painted with **abutting 1 px horizontal lines**
-through `gw.wPolyline`, the only primitive that proved reliable here. Visually it
-reads as a solid fill.
+through `gw.wPolyline`, the only primitive that proved reliable here. At 100 %
+opacity it reads as a solid fill.
 
 ### Code landmarks (for picking this back up)
 
 - State globals: `RCM_active`, `RCM_aspect`, `RCM_label`, `RCM_showMask`,
-  `RCM_maskColor`, `RCM_showThirds`, `RCM_cropColor`, `RCM_offset`.
-- Functions: `rcm_viewAllowed()`, `rcm_field()`, `rcm_fillRect`,
-  `rcm_rectOutline`, `rcm_draw` (the callback), `rcm_register` /
+  `RCM_maskColor`, `RCM_opacity`, `RCM_showThirds`, `RCM_cropColor`,
+  `RCM_offset`, `RCM_sfAuto`, `RCM_lastVP`.
+- Functions: `rcm_viewAllowed()`, `rcm_syncSafeFrame()`, `rcm_field()`,
+  `rcm_fillRect`, `rcm_rectOutline`, `rcm_draw` (the callback), `rcm_register` /
   `rcm_unregister`; on the UI side `pushState()`, `lockText()`, `setAspect`,
   `applyCustom()`, `isCustom()`.
+- `rcm_syncSafeFrame` writes `displaySafeFrames` only when the active viewport
+  index differs from `RCM_lastVP`. That guard is what stops the write from
+  looping (writing triggers a redraw, which re-enters the callback) **and** what
+  makes a manual `Shift+F` survive. Do not "simplify" it into a plain assignment.
 - The tool body sits in a plain block; `aioli_ratiomask_open` is the global the
   macro calls. Keep it that way — a macroScript that carries the code instead of
   calling into it is a macroScript that ignores `git pull`.
@@ -121,12 +164,7 @@ reads as a solid fill.
 
 ## Notes and limits
 
-- **Safe frame required.** The overlay lines up with the render area, which Max
-  only displays correctly when the safe frame is on, so it is turned on
-  automatically. The "rezoom" you see when enabling is normal — Max letterboxes
-  the viewport towards the 1:1 square — and it does not touch the camera.
-- **The matte is opaque.** No alpha in the graphics window, so it is a flat fill.
-  Picking a dark grey rather than black keeps a bit of visual context.
+- **No real transparency**, see *Opacity* above.
 - **Custom ratios are not persistent** between sessions.
 - **1:1 render expected.** The tool adapts to any render ratio, but it is
   designed around a square render.
@@ -135,10 +173,8 @@ reads as a solid fill.
 
 ## Ideas
 
-- Persist settings (last ratio, colours, offset) in an `.ini`.
-- Adjustable fill step (a line every 2 px) to lighten drawing on large viewports.
+- Persist settings (last ratio, colours, offset, opacity) in an `.ini`.
 - Grey out the W/H fields outside Custom mode.
-- Semi-transparent darkening, if a blend method ever becomes available.
 - Several ratios at once (nested outlines, no matte, for comparison).
 - A frame buffer (VFB) version alongside the viewport one.
 
@@ -146,6 +182,9 @@ reads as a solid fill.
 
 ## Changelog
 
+- **1.2** — matte **opacity** (5–100 %, simulated by thinning the fill) and
+  **Safe frame auto**: the safe frame follows the viewport the overlay draws in
+  instead of staying on everywhere.
 - **1.1** — the overlay follows Max's render viewport lock instead of hopping to
   whichever viewport you click. Removed the "Render frame (1:1)" outline toggle
   and its colour picker (the matte already reads the render square).
