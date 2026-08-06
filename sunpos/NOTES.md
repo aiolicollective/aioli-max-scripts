@@ -73,6 +73,23 @@ data.** A "nearest city" heuristic gets it wrong near borders, and being an hour
 out is worth ~15° of azimuth — exactly the kind of invisible mistake that was
 eliminated.
 
+### `auto` is parked — decision of 2026-08-06
+
+Nobody has run `setup.bat`, and the panel is used in `zone` mode, which is enough
+for the work we do. That is a deliberate state, not an oversight:
+
+- `auto` **stays in the drop-down**. `setup.bat` does not make the entry appear,
+  it makes it work. Hiding it would only make the option harder to find the day
+  it is wanted.
+- Without a `.venv` it **degrades cleanly**: a line in the log at startup, and an
+  explicit refusal at *Place sun* time (`_NO_VENV`) before anything is computed
+  or moved. Nothing half-happens.
+- The `.venv` therefore belongs, in practice, to the **outside-Max** use of this
+  folder (CLI, another 3D application) — `auto` in the panel is a side benefit.
+
+If that is ever revisited, the thing to weigh is the offline table going stale
+(see below), not the convenience.
+
 ### `auto` mode installs nothing into 3ds Max
 
 Resolving an IANA zone needs `timezonefinder` **and** `tzdata` — on Windows,
@@ -95,6 +112,11 @@ cannot honestly follow are **absent** rather than approximated:
 
 Those three were found **by the test**, not by rereading the code. If zones are
 added, the test has to stay green.
+
+This is the one thing `auto` would buy, so it is worth being clear about the
+risk: the table is right today and the tests say so, but a country changing its
+law makes it silently stale. Running the suite after a `git pull` of `tzdata` is
+what would catch it.
 
 ### Atmospheric refraction, on by default
 
@@ -183,8 +205,12 @@ the outstanding work on this tool.
    `system units '?' not recognised`.
 4. `node.position.controller = Position_XYZ()` must actually clear the track on a
    V-Ray Sun. Careful: this wipes any rig on the sun.
-5. `auto` mode on Windows: confirm no console flashes.
-6. Drag & drop of the `.ms`, then a toolbar button surviving a restart.
+
+Done: drag & drop of the `.ms` and a toolbar button surviving a restart, checked
+on 2026-08-06.
+
+Parked with `auto` itself: confirming no console flashes on Windows when
+`tzlookup.py` runs. It cannot happen until someone installs the `.venv`.
 
 ---
 
