@@ -1,5 +1,5 @@
 /***************************************************************************************
-    aioli-ratiomask  (Aioli Ratio Mask)  -  v1.3
+    aioli-ratiomask  (Aioli Ratio Mask)  -  v1.4
     --------------------------------------------------------------------------------
     For 3ds Max 2026 (works on earlier versions with Nitrous too).
 
@@ -16,6 +16,14 @@
       - We paint a matte (4 bands) all around that rectangle.
       - We draw the outline + (option) the rule of thirds.
       - renderWidth/renderHeight are never written to -> render ratio untouched.
+
+    CUSTOM RATIO :
+      The W/H fields are a RATIO, not a size, so you can type the actual pixel
+      dimensions of the crop you are aiming for (9354 x 6283) and let the tool
+      reduce it - hence the 99999 ceiling instead of the old 500. Only the
+      quotient matters: 9354/6283, 1487/999 and 1.489/1 draw the same frame.
+      Past 9 characters the on-screen label falls back to the decimal form
+      ("1.489:1") so it does not run across the viewport.
 
     VIEWPORT LOCK :
       MAXScript can only draw into the ACTIVE viewport, so the overlay used to
@@ -283,10 +291,13 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
         dropdownlist ddl_ratio    ""                       pos:[48,42] width:92
         button      btn_flip     "Flip"                   pos:[146,42] width:46 height:21
 
-        spinner     spn_w        "W"  pos:[44,74]  width:54  range:[1,500,16] type:#integer \
-                    tooltip:"Width of the Custom ratio (live only when 'Custom' is selected)."
-        spinner     spn_h        "H"  pos:[110,74] width:54  range:[1,500,9]  type:#integer \
-                    tooltip:"Height of the Custom ratio (live only when 'Custom' is selected)."
+        -- These two are a RATIO, not a size: type the real pixel dimensions of
+        -- the crop you want (9354 x 6283) and only the quotient is used. Wide
+        -- enough fields to actually see five digits.
+        spinner     spn_w        "W"  pos:[8,74]   width:88  range:[1,99999,16] type:#integer \
+                    tooltip:"Width of the Custom ratio, up to 99999 - paste a real pixel size if that is easier (9354). Live only when 'Custom' is selected."
+        spinner     spn_h        "H"  pos:[104,74] width:88  range:[1,99999,9]  type:#integer \
+                    tooltip:"Height of the Custom ratio, up to 99999 - paste a real pixel size if that is easier (6283). Live only when 'Custom' is selected."
 
         spinner     spn_off      "Offset"  pos:[8,100] width:150 range:[-100,100,0] type:#integer \
                     tooltip:"Shifts the frame on the free axis (vertical in landscape, horizontal in portrait). Clamped to the 1:1 square."
@@ -343,7 +354,14 @@ global aioli_ratiomask_open   -- entry point called by the macroScript
             local w = spn_w.value as float
             local h = spn_h.value as float
             if h > 0 do
-                setAspect (w/h) ((spn_w.value as string) + ":" + (spn_h.value as string))
+            (
+                -- "9354:6283" is painted in the viewport corner and gets long
+                -- fast with real pixel sizes, so past 9 characters we show the
+                -- decimal form instead. The ratio itself is unchanged.
+                local lbl = (spn_w.value as string) + ":" + (spn_h.value as string)
+                if lbl.count > 9 do lbl = (formattedPrint (w/h) format:".3f") + ":1"
+                setAspect (w/h) lbl
+            )
         )
 
         fn isCustom = ( ddl_ratio.selected == "Custom" )
