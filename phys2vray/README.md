@@ -6,13 +6,14 @@
 > still unverified is listed in [`NOTES.md`](NOTES.md).
 
 Replace the native **Physical Materials** on the selected objects with
-**VRayMtl**, every texture map plugged back into the right V-Ray slot.
-Made for FBX files exported from Blender, works on any Physical Material.
+**VRayMtl**, every texture map plugged back into the right V-Ray slot as a
+**VRayBitmap**, all of them sharing one **VRayUVWRandomizer**. Made for FBX
+files exported from Blender, works on any Physical Material.
 
 - **File:** `aioli-phys2vray.ms` — single file, no dependency
 - **Compatibility:** 3ds Max 2017+ (Physical Material), V-Ray 5+ (metalness,
   roughness mode, coat, sheen). Written for 3ds Max 2026 / V-Ray 7.
-- **Version:** 1.0 — **in test**, see [`NOTES.md`](NOTES.md)
+- **Version:** 1.1 — **in test**, see [`NOTES.md`](NOTES.md) and the [changelog](#changelog)
 
 ---
 
@@ -76,12 +77,22 @@ tool asks before going on.
 | Coating, colour, roughness, IOR, bump + maps | Coat layer |
 | Sheen, colour, roughness + maps | Sheen layer |
 | Bump map + amount | Bump map, amount × 100 |
-| Normal Bump in the bump slot | VRayNormalMap (option, default) |
+| Normal Bump in the bump slot | VRayNormalMap (option, default), green flipped for OpenGL maps (option, default) |
+| Bitmap, in any slot | VRayBitmap (option, default) + shared VRayUVWRandomizer (option, default) |
 | Displacement map + amount | Displacement map, amount × 100 |
 
-The maps themselves are **reused, never copied**: the VRayMtl points at the same
-Bitmap nodes, with their tiling, crop and output settings. Normal Bumps are the
-exception — rebuilt as VRayNormalMap with the same maps, multipliers and flips.
+Maps other than bitmaps (Output, Color Correction, procedurals…) are **reused,
+not copied**: the VRayMtl points at the same nodes. Two kinds are rebuilt:
+
+- **Bitmaps become VRayBitmaps** — same file, UVW coordinates (tiling, offset,
+  angle, channel, blur), output settings, mono / RGB output and alpha source.
+  Data maps (roughness, metalness, normal, bump, opacity…) get the transfer
+  function *none* (linear); colour maps get *from 3ds Max*, so 3ds Max's colour
+  management decides per file as it did for the Bitmap. RGB primaries stay on
+  *Default*, which converts nothing. Every VRayBitmap gets the same
+  VRayUVWRandomizer in its `mapSource`.
+- **Normal Bumps become VRayNormalMaps**, with the same maps, multipliers and
+  flips.
 
 Not converted, and reported as such: sub-surface scattering, thin film,
 anisotropy, base weight map, emission colour temperature. Any other map left in
@@ -93,13 +104,15 @@ a Physical slot is listed by name in the Listener — nothing is dropped silentl
 
 | Control | Effect |
 |---|---|
+| Bitmap → VRayBitmap | Every Bitmap of the converted materials becomes a VRayBitmap, swapped everywhere it is used. A Bitmap also used by a material, a modifier (Displace…) or an object outside the run is left as it is. |
+| Shared VRayUVWRandomizer | Plugs one VRayUVWRandomizer, named `phys2vray UVW randomizer`, into every VRayBitmap. An existing one with that name is reused, so successive imports answer to the same settings. **Check its settings**: random offset, rotation or scale misplace unwrapped (non-tiling) textures. |
 | White reflection, Fresnel from IOR (PBR) | Reflection white, Fresnel driven by the IOR: what a Principled BSDF means. Off, the reflection is the Physical reflectivity × reflection colour and their maps are plugged. |
 | Roughness map is | *As set in the Physical* follows the Inv toggle. *Roughness* / *Glossiness* force how the map is read, when the import got it wrong; the scalar value is converted to match. |
 | Normal Bump → VRayNormalMap | Rebuilds Normal Bumps as VRayNormalMap. Off, the Normal Bump is plugged as it is (V-Ray renders it too). |
 | Bump bitmap named \*normal\* → normal map | A bare bitmap in the bump slot whose file name says normal (`normal`, `nrm`, `_nor`, `_n`) is wrapped in a VRayNormalMap instead of being read as a height map. Its bump amount is set to 100. |
-| Flip green on normal maps | For DirectX normal maps. Blender writes OpenGL ones: leave off unless the relief looks inverted. |
+| Flip green: OpenGL normal maps (Blender) | **On by default.** V-Ray for 3ds Max reads normal maps as DirectX (Y-), Blender writes OpenGL (Y+) — confirmed by Chaos. A flip already set on a Normal Bump is kept. Untick for DirectX maps (made for 3ds Max, Unreal, Substance's DirectX preset). |
 | Transparency map → Opacity | Reads a map in the transparency slot as an alpha cutout (Blender exports its alpha there) and sends it to opacity instead of refraction. |
-| Data maps in linear | Roughness, metalness, normal, bump, opacity bitmaps are data, not colour: they are reloaded with gamma 1.0 (gamma mode) or the `Raw` colour space (OCIO, 3ds Max 2024+). A bitmap also used in a colour slot, or by a material outside the run, is left as it is. |
+| Data maps in linear | Roughness, metalness, normal, bump, opacity are data, not colour. With VRayBitmap: transfer function *none*. Without (option off, or a Bitmap shared outside the run): the Bitmap is reloaded with gamma 1.0 (gamma mode) or the `Raw` colour space (OCIO, 3ds Max 2024+). A bitmap also used in a colour slot is treated as colour. |
 
 ---
 
@@ -115,6 +128,19 @@ a Physical slot is listed by name in the Listener — nothing is dropped silentl
 - **V-Ray not loaded**: the tool says so and does nothing.
 - **Older V-Ray** (no metalness, roughness mode, coat or sheen): what cannot be
   set is reported, the rest is converted.
+
+---
+
+## Changelog
+
+- **1.1** — Bitmaps become VRayBitmaps (data maps linear, colour maps *from 3ds
+  Max*), all sharing one VRayUVWRandomizer, reused by name between runs. *Flip
+  green* on by default: V-Ray for 3ds Max reads normals as DirectX, Blender
+  writes OpenGL. A flip already set on a Normal Bump is now kept (it used to be
+  toggled). Bitmaps used by a modifier or object outside the run are left alone.
+  Settings key renamed (`FlipGreenOpenGL`) so an old saved *off* does not
+  override the new default.
+- **1.0** — First version, in test.
 
 ---
 
