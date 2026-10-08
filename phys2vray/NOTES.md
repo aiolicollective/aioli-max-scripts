@@ -41,6 +41,7 @@ Listener.** That output is the ground truth the open questions below need.
 | 12 | VRayBitmap: default `maptype` and `color_space` of a new one, and are 4 (3ds Max standard) and 0 / 3 (none / from 3ds Max) still those values in V-Ray 7? | The log prints the defaults once per run. Indices taken from Lecchi's scripts (`maptype == 2` is spherical, `color_space` 0 none … 3 from 3ds Max). | `makeVRayBitmap` |
 | 13 | VRayBitmap names for `monoOutput`, `rgbOutput`, `alphaSource`, `output`, `coords` | Copied when the names match; a non-default value that cannot be set is warned (alpha cutouts read from the alpha channel depend on it). | `makeVRayBitmap` |
 | 14 | VRayUVWRandomizer defaults, and does `mapSource` bypass the VRayBitmap's own tiling? | The randomizer's properties are printed when it is created. A bitmap with non-default tiling gets a warning. | `sharedRandomizer` |
+| 15 | After a `replaceInstances`, does the Slate view show one node per map, or the swapped node twice? | Cosmetic. | `doWork`, `processBitmaps` |
 
 ---
 
@@ -140,6 +141,23 @@ Blender normal maps need their green flipped. For a Normal Bump, a flip already
 set is kept (OR, not XOR: Normal Bump and VRayNormalMap read the same way, so a
 Normal Bump that was right stays right). The settings key was renamed so an old
 saved *off* does not override the new default.
+
+### The button reads the file at every click (1.2)
+
+The first launchers (all four tools until 1.2) called the function already in
+memory when the tool had been loaded once in the session, and only read the
+file after a restart. So a `git pull` did not reach the button until 3ds Max
+was restarted — most likely why the first 1.1 test showed no VRayBitmap. The
+phys2vray macro now always runs `fileIn` on the file, and only falls back to
+the function in memory (with a message) when the file is gone.
+
+### Old Normal Bumps are swapped, not left behind (1.2)
+
+1.1 plugged the new VRayNormalMap into the VRayMtl and left the Normal Bump
+referenced only by the orphaned Physical: it stayed visible in the Slate view,
+cut off. It is now swapped with `replaceInstances` like the bitmaps, unless a
+material, modifier or object outside the run still uses it. A bitmap wrapped
+in a VRayNormalMap is never swapped that way: the VRayNormalMap contains it.
 
 ### No `return` inside `try`
 

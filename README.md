@@ -103,7 +103,7 @@ The first three are installed on the collective's machines: dragged in,
 buttons in place, working. `clonelayers` and `sunpos` are at **v1.0**, `ratiomask` at
 **v1.3** — see its [changelog](ratiomask/README.md#changelog).
 
-`phys2vray` is at **v1.1, in test**: written without a 3ds Max at hand, now
+`phys2vray` is at **v1.2, in test**: written without a 3ds Max at hand, now
 being tried on real Blender imports and corrected as we go. Its
 [`NOTES.md`](phys2vray/NOTES.md) lists what is still unverified.
 

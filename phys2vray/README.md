@@ -13,7 +13,7 @@ files exported from Blender, works on any Physical Material.
 - **File:** `aioli-phys2vray.ms` — single file, no dependency
 - **Compatibility:** 3ds Max 2017+ (Physical Material), V-Ray 5+ (metalness,
   roughness mode, coat, sheen). Written for 3ds Max 2026 / V-Ray 7.
-- **Version:** 1.1 — **in test**, see [`NOTES.md`](NOTES.md) and the [changelog](#changelog)
+- **Version:** 1.2 — **in test**, see [`NOTES.md`](NOTES.md) and the [changelog](#changelog)
 
 ---
 
@@ -36,8 +36,10 @@ The panel opens and a macro is registered under the **`aiolicollective`** catego
 (action `phys2vray`) for a toolbar button or a keyboard shortcut.
 
 The path to this file is baked into the macro when you drag it in, so the button
-survives a restart of Max and follows `git pull`. Move the clone and you just drag
-the `.ms` in once more — see the [root README](../README.md#toolbar-buttons).
+survives a restart of Max. **The button reads the file again at every click**, so
+a `git pull` applies at the next click, without restarting Max. Move the clone
+and you just drag the `.ms` in once more — see the
+[root README](../README.md#toolbar-buttons).
 
 Settings are remembered between sessions in an `.ini` in `getDir #plugcfg`.
 
@@ -92,7 +94,9 @@ not copied**: the VRayMtl points at the same nodes. Two kinds are rebuilt:
   *Default*, which converts nothing. Every VRayBitmap gets the same
   VRayUVWRandomizer in its `mapSource`.
 - **Normal Bumps become VRayNormalMaps**, with the same maps, multipliers and
-  flips.
+  flips, swapped everywhere the Normal Bump was used: no dead Normal Bump is
+  left in the Slate views. A Normal Bump still used outside the run is kept
+  for it.
 
 Not converted, and reported as such: sub-surface scattering, thin film,
 anisotropy, base weight map, emission colour temperature. Any other map left in
@@ -133,6 +137,11 @@ a Physical slot is listed by name in the Listener — nothing is dropped silentl
 
 ## Changelog
 
+- **1.2** — The toolbar button reads the file again at every click: until now
+  it reopened the version already in memory, so a `git pull` only applied after
+  restarting 3ds Max (most likely why the first 1.1 test showed no VRayBitmap).
+  The old Normal Bump is swapped for its VRayNormalMap everywhere instead of
+  being left orphaned in the Slate view.
 - **1.1** — Bitmaps become VRayBitmaps (data maps linear, colour maps *from 3ds
   Max*), all sharing one VRayUVWRandomizer, reused by name between runs. *Flip
   green* on by default: V-Ray for 3ds Max reads normals as DirectX, Blender

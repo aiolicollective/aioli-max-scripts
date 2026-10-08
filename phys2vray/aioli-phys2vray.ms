@@ -7,7 +7,7 @@
 	FBX -> Physical Material on import), works on any Physical Material.
 
 	Author   : /ai.oli collective
-	Version  : 1.1 (in test)
+	Version  : 1.2 (in test)
 	Compat.  : 3ds Max 2017+ (Physical Material) with V-Ray 5+ (metalness,
 	           roughness mode, coat, sheen). Written for 3ds Max 2026 / V-Ray 7.
 	Usage    : Scripting > Run Script, or drag & drop into 3ds Max. The script
@@ -1244,6 +1244,23 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 					if ok do converted += 1
 				)
 			)
+			-- Normal Bumps rebuilt as VRayNormalMap are swapped everywhere they
+			-- are used (the orphaned Physicals, the Slate views), so no dead
+			-- Normal Bump is left behind. Not when something outside the run
+			-- still uses it. A wrapped bitmap is never swapped: its VRayNormalMap
+			-- contains it.
+			if not dryRun do
+			(
+				for i = 1 to nrmSrc.count where classOf nrmSrc[i] == Normal_Bump do
+				(
+					local outside = usedOutsideRun nrmSrc[i] (olds + news)
+					if outside != undefined then
+						logLine ("    Normal Bump \"" + nrmSrc[i].name + "\" also used by " + (userName outside) + ": kept for it")
+					else
+						try (replaceInstances nrmSrc[i] nrmDst[i])
+						catch (warn ("Normal Bump \"" + nrmSrc[i].name + "\" could not be swapped for its VRayNormalMap: " + (getCurrentException())))
+				)
+			)
 			-- bitmaps may be shared by the materials of this run only
 			processBitmaps cm dryRun (olds + news)
 			-- viewport display, once the maps are final
@@ -1442,9 +1459,11 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 --
 -- THE PATH TO THIS FILE IS BAKED INTO THE MACRO at drag & drop time, the
 -- same way the other aiolicollective tools do it. That is what makes the
--- toolbar button work after a restart from WHEREVER the repo was cloned,
--- and keep following git pull. Move the folder and you just drag the .ms
--- in again.
+-- toolbar button work after a restart from WHEREVER the repo was cloned.
+-- Unlike the first launchers, this one reads the file again at EVERY click:
+-- calling the function already in memory would keep running the old version
+-- after a git pull until 3ds Max is restarted (hit in test, 1.1). Move the
+-- folder and you just drag the .ms in again.
 ------------------------------------------------------------------------
 (
 	local thisFile = ""
@@ -1462,21 +1481,18 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 	src += "(\n"
 	src += "    on execute do\n"
 	src += "    (\n"
-	src += "        if aioli_phys2vray_open != undefined then\n"
-	src += "            aioli_phys2vray_open()\n"
+	src += "        -- The file is read again at every click: a git pull applies\n"
+	src += "        -- at once, without restarting 3ds Max.\n"
+	src += "        local p = @\"" + thisFile + "\"\n"
+	src += "        if doesFileExist p then\n"
+	src += "            fileIn p\n"
 	src += "        else\n"
 	src += "        (\n"
-	src += "            -- Not loaded yet in this session of Max: read the file\n"
-	src += "            -- again. Running it re-registers the macro and opens\n"
-	src += "            -- the window, so edits pulled from git apply at once.\n"
-	src += "            local p = @\"" + thisFile + "\"\n"
-	src += "            if doesFileExist p then\n"
-	src += "                fileIn p\n"
-	src += "            else\n"
-	src += "                messageBox (\"Script not found:\\n\" + p + \"\\n\\n\" + \\\n"
-	src += "                            \"Did the folder move? \" + \\\n"
-	src += "                            \"Drag aioli-phys2vray.ms into 3ds Max again.\") \\\n"
-	src += "                           title:\"aioli-phys2vray\"\n"
+	src += "            messageBox (\"Script not found:\\n\" + p + \"\\n\\n\" + \\\n"
+	src += "                        \"Did the folder move? \" + \\\n"
+	src += "                        \"Drag aioli-phys2vray.ms into 3ds Max again.\") \\\n"
+	src += "                       title:\"aioli-phys2vray\"\n"
+	src += "            if aioli_phys2vray_open != undefined do aioli_phys2vray_open()\n"
 	src += "        )\n"
 	src += "    )\n"
 	src += ")\n"
