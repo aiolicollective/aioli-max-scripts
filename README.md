@@ -4,15 +4,16 @@ Custom tools the [/ai.oli](https://github.com/aiolicollective) collective builds
 itself and runs inside 3ds Max, on the productions where we use it. Kept in one place
 so they stay usable, updatable and shareable.
 
-Three tools so far. Each lives in its own folder with its own README.
+Four tools so far. Each lives in its own folder with its own README.
 
 | Tool | What it does |
 |---|---|
 | [**clonelayers**](clonelayers/) | Clones a selection and rebuilds the whole layer / sub-layer tree of the sources, with a prefix, a suffix or an auto-incremented number. |
 | [**ratiomask**](ratiomask/) | Viewport matte that previews any crop ratio (16:9, 9:16, 4:5…) without ever touching the render settings. Render 1:1, crop later. |
 | [**sunpos**](sunpos/) | Places a sun at the real sun's position for a location, date and time, taking the scene's north rotation into account. NOAA maths, no time zone guessing. |
+| [**phys2vray**](phys2vray/) *(in test)* | Replaces the Physical Materials on the selection (Blender FBX imports, typically) with VRayMtl, every texture map plugged back into the right slot. |
 
-`clonelayers` and `ratiomask` are pure MaxScript, single file, no dependency.
+`clonelayers`, `ratiomask` and `phys2vray` are pure MaxScript, single file, no dependency.
 `sunpos` is a Python panel and ships as a folder — it runs on what 3ds Max already
 has (`pymxs`, PySide, the Python standard library), so it needs no install either.
 
@@ -36,8 +37,9 @@ Then, **once per tool**: drag its `.ms` into a 3ds Max window (or
 | clonelayers | `clonelayers/aioli-clonelayers.ms` |
 | ratiomask | `ratiomask/aioli-ratiomask.ms` |
 | sunpos | `sunpos/aioli-sunpos.ms` |
+| phys2vray | `phys2vray/aioli-phys2vray.ms` |
 
-**None of the three needs anything installed in order to be used in 3ds Max.**
+**None of them needs anything installed in order to be used in 3ds Max.**
 `sunpos` ships an optional `setup.bat`, but that is for running the calculation
 **outside** Max — on the command line, or to feed another 3D application. It also
 unlocks the `auto` time zone mode inside the panel; everything else there, daylight
@@ -52,7 +54,7 @@ the same files and pick the new version up on the next click.
 ## Toolbar buttons
 
 `Customize > Customize User Interface…` > **Toolbars** tab > Category
-**`aiolicollective`** > drag the action onto a toolbar. The same three actions are
+**`aiolicollective`** > drag the action onto a toolbar. The same actions are
 available in the Menus, Quads and Keyboard tabs.
 
 | Category | Action | Macro |
@@ -60,8 +62,9 @@ available in the Menus, Quads and Keyboard tabs.
 | `aiolicollective` | `clonelayers` | `aioli_clonelayers` |
 | `aiolicollective` | `ratiomask` | `aioli_ratiomask` |
 | `aiolicollective` | `sunpos` | `aioli_sunpos` |
+| `aiolicollective` | `phys2vray` | `aioli_phys2vray` |
 
-All three behave the same way, on purpose:
+All of them behave the same way, on purpose:
 
 - **The button survives a restart of 3ds Max.** Max writes the macro into its own
   `usermacros` folder and re-reads it on startup.
@@ -86,17 +89,23 @@ Written for **3ds Max 2026**, tested there.
 come with 3ds Max 2026, falling back to PySide2 on older versions — nothing to
 install, and Autodesk's Python is never modified.
 
-Renderer-agnostic throughout: none of these tools touch render settings.
-`sunpos` moves whichever sun you point it at — V-Ray Sun, Corona Sun, native
-target light or free directional.
+None of these tools touch render settings. `clonelayers`, `ratiomask` and
+`sunpos` are renderer-agnostic — `sunpos` moves whichever sun you point it at,
+V-Ray Sun, Corona Sun, native target light or free directional. `phys2vray` is
+the V-Ray one by nature: it needs V-Ray 5+ loaded, and runs on 3ds Max 2017+
+(Physical Material).
 
 ---
 
 ## Status
 
-All three are installed on the collective's machines: dragged in, buttons in
-place, working. `clonelayers` and `sunpos` are at **v1.0**, `ratiomask` at
+The first three are installed on the collective's machines: dragged in,
+buttons in place, working. `clonelayers` and `sunpos` are at **v1.0**, `ratiomask` at
 **v1.3** — see its [changelog](ratiomask/README.md#changelog).
+
+`phys2vray` is at **v1.0, in test**: written without a 3ds Max at hand, now
+being tried on real Blender imports and corrected as we go. Its
+[`NOTES.md`](phys2vray/NOTES.md) lists what is still unverified.
 
 `sunpos` has 47 automated tests covering the maths and the CLI, but its `pymxs`
 layer has not been exercised end to end in Max yet — see
@@ -109,7 +118,7 @@ Issues and pull requests welcome.
 
 ## Contributing
 
-Each tool folder is self-contained; adding a fourth means adding a folder and a
+Each tool folder is self-contained; adding one more means adding a folder and a
 row in the tables above.
 
 Conventions we hold to:
@@ -119,7 +128,7 @@ Conventions we hold to:
   tool, macro named `aioli_<tool>`, file named `aioli-<tool>.ms` — so a tool is
   recognisable wherever you meet it.
 - **The macro is a launcher, never a copy of the code.** Bake the path in with
-  `getSourceFileName()` at registration time, the way all three do. That is what
+  `getSourceFileName()` at registration time, the way they all do. That is what
   keeps `git pull` meaningful.
 - **Nothing gets installed to use a tool.** Optional extras may ask for a setup
   step, but the drag & drop path must always work on what 3ds Max already ships.
