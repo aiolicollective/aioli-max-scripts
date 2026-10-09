@@ -11,7 +11,7 @@ Four tools so far. Each lives in its own folder with its own README.
 | [**clonelayers**](clonelayers/) | Clones a selection and rebuilds the whole layer / sub-layer tree of the sources, with a prefix, a suffix or an auto-incremented number. |
 | [**ratiomask**](ratiomask/) | Viewport matte that previews any crop ratio (16:9, 9:16, 4:5…) without ever touching the render settings. Render 1:1, crop later. |
 | [**sunpos**](sunpos/) | Places a sun at the real sun's position for a location, date and time, taking the scene's north rotation into account. NOAA maths, no time zone guessing. |
-| [**phys2vray**](phys2vray/) *(in test)* | Replaces the Physical Materials on the selection (Blender FBX imports, typically) with VRayMtl, every texture map plugged back into the right slot as a VRayBitmap, with a shared UVW randomizer. |
+| [**phys2vray**](phys2vray/) *(in test)* | Replaces the Physical Materials on the selection (Blender FBX imports, typically) with VRayMtl, every texture map plugged back into the right slot as a VRayBitmap, with one UVW randomizer per material. |
 
 `clonelayers`, `ratiomask` and `phys2vray` are pure MaxScript, single file, no dependency.
 `sunpos` is a Python panel and ships as a folder — it runs on what 3ds Max already
@@ -103,7 +103,7 @@ The first three are installed on the collective's machines: dragged in,
 buttons in place, working. `clonelayers` and `sunpos` are at **v1.0**, `ratiomask` at
 **v1.3** — see its [changelog](ratiomask/README.md#changelog).
 
-`phys2vray` is at **v1.2, in test**: written without a 3ds Max at hand, now
+`phys2vray` is at **v1.3, in test**: written without a 3ds Max at hand, now
 being tried on real Blender imports and corrected as we go. Its
 [`NOTES.md`](phys2vray/NOTES.md) lists what is still unverified.
 

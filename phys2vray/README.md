@@ -7,13 +7,14 @@
 
 Replace the native **Physical Materials** on the selected objects with
 **VRayMtl**, every texture map plugged back into the right V-Ray slot as a
-**VRayBitmap**, all of them sharing one **VRayUVWRandomizer**. Made for FBX
-files exported from Blender, works on any Physical Material.
+**VRayBitmap**; the VRayBitmaps of a material share one **VRayUVWRandomizer**,
+each material has its own. Made for FBX files exported from Blender, works on
+any Physical Material.
 
 - **File:** `aioli-phys2vray.ms` — single file, no dependency
 - **Compatibility:** 3ds Max 2017+ (Physical Material), V-Ray 5+ (metalness,
   roughness mode, coat, sheen). Written for 3ds Max 2026 / V-Ray 7.
-- **Version:** 1.2 — **in test**, see [`NOTES.md`](NOTES.md) and the [changelog](#changelog)
+- **Version:** 1.3 — **in test**, see [`NOTES.md`](NOTES.md) and the [changelog](#changelog)
 
 ---
 
@@ -80,23 +81,30 @@ tool asks before going on.
 | Sheen, colour, roughness + maps | Sheen layer |
 | Bump map + amount | Bump map, amount × 100 |
 | Normal Bump in the bump slot | VRayNormalMap (option, default), green flipped for OpenGL maps (option, default) |
-| Bitmap, in any slot | VRayBitmap (option, default) + shared VRayUVWRandomizer (option, default) |
+| Bitmap, in any slot | VRayBitmap (option, default) + one VRayUVWRandomizer per material (option, default) |
 | Displacement map + amount | Displacement map, amount × 100 |
 
 Maps other than bitmaps (Output, Color Correction, procedurals…) are **reused,
-not copied**: the VRayMtl points at the same nodes. Two kinds are rebuilt:
+not copied**: the VRayMtl points at the same nodes. Two kinds are rebuilt, for
+each material on its own:
 
 - **Bitmaps become VRayBitmaps** — same file, UVW coordinates (tiling, offset,
   angle, channel, blur), output settings, mono / RGB output and alpha source.
   Data maps (roughness, metalness, normal, bump, opacity…) get the transfer
-  function *none* (linear); colour maps get *from 3ds Max*, so 3ds Max's colour
-  management decides per file as it did for the Bitmap. RGB primaries stay on
-  *Default*, which converts nothing. Every VRayBitmap gets the same
-  VRayUVWRandomizer in its `mapSource`.
+  function *none* and the RGB primaries *Raw* (no conversion at all, as Chaos
+  recommends); colour maps get *from 3ds Max*, so 3ds Max's colour management
+  decides per file as it did for the Bitmap, primaries left on *Default*. The
+  VRayBitmaps of a material share that material's VRayUVWRandomizer
+  (`mapSource`); two materials never share one. A Bitmap used by two materials
+  gives one VRayBitmap in each.
 - **Normal Bumps become VRayNormalMaps**, with the same maps, multipliers and
-  flips, swapped everywhere the Normal Bump was used: no dead Normal Bump is
-  left in the Slate views. A Normal Bump still used outside the run is kept
-  for it.
+  flips.
+
+The old Bitmaps and Normal Bumps are **never modified**: another material may
+still use them. Once nothing in use needs them, their nodes are taken out of
+the Slate views, so no cut-off node is left next to the new material. A Bitmap
+inside a map reused as it is (Output, Mix, a Normal Bump that is kept) stays a
+Bitmap, and the log says so.
 
 Not converted, and reported as such: sub-surface scattering, thin film,
 anisotropy, base weight map, emission colour temperature. Any other map left in
@@ -108,15 +116,15 @@ a Physical slot is listed by name in the Listener — nothing is dropped silentl
 
 | Control | Effect |
 |---|---|
-| Bitmap → VRayBitmap | Every Bitmap of the converted materials becomes a VRayBitmap, swapped everywhere it is used. A Bitmap also used by a material, a modifier (Displace…) or an object outside the run is left as it is. |
-| Shared VRayUVWRandomizer | Plugs one VRayUVWRandomizer, named `phys2vray UVW randomizer`, into every VRayBitmap. An existing one with that name is reused, so successive imports answer to the same settings. **Check its settings**: random offset, rotation or scale misplace unwrapped (non-tiling) textures. |
+| Bitmap → VRayBitmap | Every Bitmap plugged in a converted material becomes a VRayBitmap in that material. The Bitmap itself is not modified. |
+| VRayUVWRandomizer per material | Each material gets its own VRayUVWRandomizer, named after it (`<material> UVW randomizer`) and shared by all its VRayBitmaps. **Check its settings**: random offset, rotation or scale misplace unwrapped (non-tiling) textures. |
 | White reflection, Fresnel from IOR (PBR) | Reflection white, Fresnel driven by the IOR: what a Principled BSDF means. Off, the reflection is the Physical reflectivity × reflection colour and their maps are plugged. |
 | Roughness map is | *As set in the Physical* follows the Inv toggle. *Roughness* / *Glossiness* force how the map is read, when the import got it wrong; the scalar value is converted to match. |
 | Normal Bump → VRayNormalMap | Rebuilds Normal Bumps as VRayNormalMap. Off, the Normal Bump is plugged as it is (V-Ray renders it too). |
 | Bump bitmap named \*normal\* → normal map | A bare bitmap in the bump slot whose file name says normal (`normal`, `nrm`, `_nor`, `_n`) is wrapped in a VRayNormalMap instead of being read as a height map. Its bump amount is set to 100. |
 | Flip green: OpenGL normal maps (Blender) | **On by default.** V-Ray for 3ds Max reads normal maps as DirectX (Y-), Blender writes OpenGL (Y+) — confirmed by Chaos. A flip already set on a Normal Bump is kept. Untick for DirectX maps (made for 3ds Max, Unreal, Substance's DirectX preset). |
 | Transparency map → Opacity | Reads a map in the transparency slot as an alpha cutout (Blender exports its alpha there) and sends it to opacity instead of refraction. |
-| Data maps in linear | Roughness, metalness, normal, bump, opacity are data, not colour. With VRayBitmap: transfer function *none*. Without (option off, or a Bitmap shared outside the run): the Bitmap is reloaded with gamma 1.0 (gamma mode) or the `Raw` colour space (OCIO, 3ds Max 2024+). A bitmap also used in a colour slot is treated as colour. |
+| Data maps in linear | Roughness, metalness, normal, bump, opacity are data, not colour. As VRayBitmap: transfer function *none*, RGB primaries *Raw*. A data map that stays a Bitmap (option off, or inside a reused map) is reloaded with gamma 1.0 (gamma mode) or the `Raw` colour space (OCIO, 3ds Max 2024+), unless something outside the run uses it. A bitmap also used in a colour slot is treated as colour. |
 
 ---
 
@@ -126,8 +134,8 @@ a Physical slot is listed by name in the Listener — nothing is dropped silentl
   `replaceInstances` swaps every reference: objects, Multi/Sub-Object slots,
   Material Editor slots. Material name and effects channel are kept.
 - **Shared materials stay shared.** A Physical used by ten objects becomes one
-  VRayMtl used by the same ten objects. A Normal Bump met in several materials
-  becomes one VRayNormalMap.
+  VRayMtl used by the same ten objects. Maps rebuilt (VRayBitmap,
+  VRayNormalMap) belong to one material each.
 - **One undo** for the whole conversion, Auto Key forced off during it.
 - **V-Ray not loaded**: the tool says so and does nothing.
 - **Older V-Ray** (no metalness, roughness mode, coat or sheen): what cannot be
@@ -137,6 +145,13 @@ a Physical slot is listed by name in the Listener — nothing is dropped silentl
 
 ## Changelog
 
+- **1.3** — One VRayUVWRandomizer **per material**, shared by that material's
+  VRayBitmaps (1.1 and 1.2 had one for the whole scene). VRayBitmaps and
+  VRayNormalMaps are now built per material and plugged straight into the new
+  VRayMtl: the old maps are never swapped in place any more, which is what left
+  every map twice in the Slate view. The old maps' nodes are then removed from
+  the Slate views when nothing in use needs them. Data VRayBitmaps get the RGB
+  primaries *Raw*. A data map that stays a Bitmap is still made linear.
 - **1.2** — The toolbar button reads the file again at every click: until now
   it reopened the version already in memory, so a `git pull` only applied after
   restarting 3ds Max (most likely why the first 1.1 test showed no VRayBitmap).

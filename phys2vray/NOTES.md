@@ -38,10 +38,11 @@ Listener.** That output is the ground truth the open questions below need.
 | 9 | Physical anisotropy default: 1.0 (isotropic, as V2A implies) or something else? | If the default is not 1.0, every material warns "anisotropy not converted". Noise, not damage. | end of `convertMaterial` |
 | 10 | Displacement amount: × 100 here; V2A copies it 1:1 the other way while dividing bump by 100. | One of the two is wrong. A warning asks to check. | displacement block |
 | 11 | Are `replaceInstances` and the bitmap reload undone by one Ctrl+Z? | Expected, not verified. | `runTool` |
-| 12 | VRayBitmap: default `maptype` and `color_space` of a new one, and are 4 (3ds Max standard) and 0 / 3 (none / from 3ds Max) still those values in V-Ray 7? | The log prints the defaults once per run. Indices taken from Lecchi's scripts (`maptype == 2` is spherical, `color_space` 0 none … 3 from 3ds Max). | `makeVRayBitmap` |
+| 12 | VRayBitmap: default `maptype`, `color_space` and `rgbColorSpace` of a new one, and are 4 (3ds Max standard), 0 / 3 (none / from 3ds Max) and 3 (Raw) still those values in V-Ray 7? | The log prints the defaults once per run. Indices from Lecchi's scripts (`maptype == 2` is spherical, `color_space` 0 none … 3 from 3ds Max) and Vella's (`rgbColorSpace == 3` read as raw). A data VRayBitmap must show *Raw* in its RGB primaries. | `makeVRayBitmap` |
 | 13 | VRayBitmap names for `monoOutput`, `rgbOutput`, `alphaSource`, `output`, `coords` | Copied when the names match; a non-default value that cannot be set is warned (alpha cutouts read from the alpha channel depend on it). | `makeVRayBitmap` |
-| 14 | VRayUVWRandomizer defaults, and does `mapSource` bypass the VRayBitmap's own tiling? | The randomizer's properties are printed when it is created. A bitmap with non-default tiling gets a warning. | `sharedRandomizer` |
-| 15 | After a `replaceInstances`, does the Slate view show one node per map, or the swapped node twice? | Cosmetic. | `doWork`, `processBitmaps` |
+| 14 | VRayUVWRandomizer defaults, and does `mapSource` bypass the VRayBitmap's own tiling? | The randomizer's properties are printed when it is created. A bitmap with non-default tiling gets a warning. | `materialRandomizer` |
+| 15 | ~~After a `replaceInstances` on a map, one node per map in the Slate view, or twice?~~ Twice (test of 1.2). Hence 1.3: maps are no longer swapped in place. | — | — |
+| 16 | Does `DeleteSelection` in a Slate view only remove nodes, or can it also cut a reference in a material? | Only maps whose every owner is an old Physical of the run are removed, so a material in use is never wired to them. Undo of the Slate clean-up not verified. | `cleanViews` |
 
 ---
 
@@ -59,9 +60,9 @@ outside users and asks before converting.
 ### Maps are reused, not copied
 
 The VRayMtl points at the very same map nodes, and the scene does not grow
-duplicate maps. Two kinds are rebuilt: Normal Bumps (as VRayNormalMap, a cache
-makes a Normal Bump met twice give one VRayNormalMap) and, since 1.1, Bitmaps
-(as VRayBitmap, see below). A shared map is never modified in place.
+duplicate maps. Two kinds are rebuilt: Normal Bumps (as VRayNormalMap) and,
+since 1.1, Bitmaps (as VRayBitmap), once per material since 1.3 (see below). A
+shared map is never modified in place.
 
 ### Roughness convention: follow the Physical, convert values, never maps
 
@@ -94,9 +95,10 @@ refraction branch only runs on weight > 0 or a transparency weight map.
 
 ### Linear reload is cautious (Bitmaps that stay Bitmaps)
 
-Since 1.1 this only applies when the VRayBitmap option is off, or to a Bitmap
-left alone because it is shared outside the run. Only bitmaps found in data
-slots are reloaded; one that is also in a colour slot of the run, or used by a
+Since 1.3 this only applies to data Bitmaps a converted material still uses
+as Bitmaps: VRayBitmap option off, or a Bitmap inside a map reused as it is
+(Output, Mix, a kept Normal Bump). Only bitmaps found in data slots are
+reloaded; one that is also in a colour slot of the run, or used by a
 material, a modifier or an object in the scene outside the run, is left as it
 is. `linearize` checks what Max gave back (`bm.colorSpace` / `bm.gamma`) when
 the bitmap exposes it, and logs "not verifiable" otherwise. Known limit: a
@@ -105,32 +107,46 @@ bitmap also used as the environment map is not detected.
 Reloading writes the resolved absolute path back into the Bitmap node; the log
 says so when the path changed.
 
-### Bitmaps become VRayBitmaps through replaceInstances (1.1)
+### Per material: VRayBitmaps, VRayNormalMaps, randomizer (1.3)
 
-Swapping each Bitmap for its VRayBitmap with `replaceInstances` reaches it
-wherever it sits — directly in a slot, inside a VRayNormalMap we just built,
-inside an Output map — and keeps sharing: one Bitmap used by three materials
-becomes one VRayBitmap used by the same three. The orphaned Physicals get it
-too, harmless. What it must not reach is a user outside the run, so a Bitmap
-also used by an in-use material, a modifier (Displace, VRayDisplacementMod) or
-a scene object outside the run is left as a Bitmap. Values are copied, not
-controllers: animated tiling or output is not carried over.
+Rule given by victor.oli after the first test: the VRayBitmaps of one material
+share one VRayUVWRandomizer; two materials never share one. All maps of a
+material must move together (colour and normal map misaligned would show at
+once), but each material is tuned on its own. So everything built for a
+material is its own: a Bitmap used by two materials gives one VRayBitmap in
+each, on each material's randomizer; a Normal Bump used by two materials gives
+two VRayNormalMaps. The randomizer is plugged through `mapSource`, the way
+Chaos staff showed on their forum, and created with V-Ray's defaults, which the
+log prints once: if they randomize, unwrapped textures (one UV layout per
+asset, the usual Blender case) end up misplaced — the log says to check.
+
+### Maps are plugged, never swapped in place (1.3)
+
+1.1 and 1.2 swapped Bitmaps and Normal Bumps with `replaceInstances`. It kept
+sharing, but `replaceInstances` also rewires the Slate view nodes: every map
+ended up shown twice, once wired to the material and once cut off (test of
+1.2). Since 1.3 the new maps are plugged straight into the maps built for the
+material (the VRayMtl, its VRayNormalMaps) with `setSubTexmap`, and the old
+Bitmaps / Normal Bumps are left as they are — which also means a map shared
+with something outside the run is never touched. A Bitmap inside a map reused
+as it is (Output, Mix, a kept Normal Bump) stays a Bitmap: modifying that map
+would modify it for everyone who shares it.
+
+The old maps' nodes are then removed from the Slate views (`sme.GetView`,
+`GetNodeByRef`, `SetSelectedNodes`, `DeleteSelection`), but only for maps whose
+every owner found is an old Physical of the run. A map with no owner found
+(environment…), or used by anything else — a converted VRayMtl, a material in
+a sample slot, a modifier — keeps its node. REPORT builds throw-away materials;
+at the end of a REPORT their maps are unplugged, so they never count as users.
 
 Transfer function: *none* for data maps, *from 3ds Max* for colour maps (Max's
 colour management decides per file, as it did for the Bitmap). A new VRayBitmap
 is not trusted to have a sensible default: older VRayHDRI defaulted to inverse
-gamma 1.0, made for HDR environments. RGB primaries are left on *Default*:
-according to Chaos it converts nothing (unless a file name carries a colour
-space tag), which is what data maps need and what colour maps already had.
-
-### One randomizer for every VRayBitmap (1.1)
-
-Asked for by victor.oli. All maps of a material must move together (colour and
-normal map misaligned would show at once), and one shared node means one place
-to tune it. Plugged through `mapSource`, the way Chaos staff showed on their
-forum. Reused by name from one run to the next. Created with V-Ray's defaults,
-which the log prints: if they randomize, unwrapped textures (one UV layout per
-asset, the usual Blender case) end up misplaced — the log says to check.
+gamma 1.0, made for HDR environments. RGB primaries: *Raw* for data maps (Chaos
+recommends transfer function none + Raw for bump, normal, displacement and
+roughness), *Default* for colour maps (no conversion unless a file name carries
+a colour space tag). Values are copied, not controllers: animated tiling or
+output is not carried over.
 
 ### Normal maps: flip green by default (1.1)
 
@@ -151,13 +167,11 @@ was restarted — most likely why the first 1.1 test showed no VRayBitmap. The
 phys2vray macro now always runs `fileIn` on the file, and only falls back to
 the function in memory (with a message) when the file is gone.
 
-### Old Normal Bumps are swapped, not left behind (1.2)
+### Old Normal Bumps left in the Slate view (1.2, replaced in 1.3)
 
-1.1 plugged the new VRayNormalMap into the VRayMtl and left the Normal Bump
-referenced only by the orphaned Physical: it stayed visible in the Slate view,
-cut off. It is now swapped with `replaceInstances` like the bitmaps, unless a
-material, modifier or object outside the run still uses it. A bitmap wrapped
-in a VRayNormalMap is never swapped that way: the VRayNormalMap contains it.
+1.1 left the Normal Bump cut off in the Slate view; 1.2 swapped it with
+`replaceInstances`, which showed the VRayNormalMap twice instead. 1.3 removes
+the old node from the views (see *Maps are plugged, never swapped in place*).
 
 ### No `return` inside `try`
 

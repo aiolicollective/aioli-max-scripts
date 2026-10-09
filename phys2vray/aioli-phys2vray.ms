@@ -7,7 +7,7 @@
 	FBX -> Physical Material on import), works on any Physical Material.
 
 	Author   : /ai.oli collective
-	Version  : 1.2 (in test)
+	Version  : 1.3 (in test)
 	Compat.  : 3ds Max 2017+ (Physical Material) with V-Ray 5+ (metalness,
 	           roughness mode, coat, sheen). Written for 3ds Max 2026 / V-Ray 7.
 	Usage    : Scripting > Run Script, or drag & drop into 3ds Max. The script
@@ -18,9 +18,10 @@
 	without touching the scene. CONVERT does it, in a single undo.
 	Both write their details to the MAXScript Listener (F11).
 
-	Bitmaps become VRayBitmaps, all sharing one VRayUVWRandomizer. Normal
-	maps get their green channel flipped by default: V-Ray for 3ds Max reads
-	them as DirectX (Y-), Blender writes OpenGL (Y+).
+	Bitmaps become VRayBitmaps; the VRayBitmaps of one material share one
+	VRayUVWRandomizer, each material has its own. Normal maps get their
+	green channel flipped by default: V-Ray for 3ds Max reads them as
+	DirectX (Y-), Blender writes OpenGL (Y+).
 -----------------------------------------------------------------------------*/
 
 global aioli_roPhys2Vray      -- the tool window
@@ -52,11 +53,21 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 		local usedProps = #()     -- Physical map slots dealt with, current material
 		local hasVRayNormal = false -- VRayNormalMap class available (checked once per run)
 		local vbClass = undefined   -- VRayBitmap (V-Ray 5+) or VRayHDRI class, checked once per run
-		local rnd = undefined       -- the shared VRayUVWRandomizer of the run
-		local rndTried = false
-		local rndName = "phys2vray UVW randomizer"
+		local isDry = false         -- REPORT run: nothing is created in the scene
+		local mData = #()           -- bitmaps in data slots, current material
+		local mColor = #()          -- bitmaps in colour slots, current material
+		local vbSrc = #()           -- Bitmaps already turned into a VRayBitmap, current material...
+		local vbDst = #()           -- ...and their VRayBitmap
+		local matRnd = undefined    -- the VRayUVWRandomizer of the current material
+		local rndWarned = false
+		local rndDumped = false
+		local keptWarned = #()      -- maps whose inner Bitmaps are kept (warned once)
+		local oldNormalBumps = #()  -- Normal Bumps replaced in the run (for the Slate clean-up)
+		local vbMade = #()          -- Bitmaps that got (or, in REPORT, would get) a VRayBitmap
+		local builtMaps = #()       -- VRayNormalMaps built in the run (released after a REPORT)
 		local mtLogged = false       -- VRayBitmap default mapping type reported once per run
 		local csLogged = false       -- VRayBitmap default transfer function reported once per run
+		local rgbLogged = false      -- VRayBitmap default RGB primaries reported once per run
 
 		----------------------------------------------------------------
 		-- UI
@@ -75,9 +86,9 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 		group "Maps"
 		(
 			checkbox chkVRayBitmap "Bitmap -> VRayBitmap" checked:true \
-				tooltip:"Every Bitmap of the converted materials becomes a VRayBitmap (same file, coordinates and output).\nA Bitmap also used by a material outside the run is left as it is."
-			checkbox chkRandomizer "Shared VRayUVWRandomizer" checked:true offset:[14,0] \
-				tooltip:"Plugs the same VRayUVWRandomizer into every VRayBitmap (mapSource).\nReused from one run to the next: it is named \"phys2vray UVW randomizer\".\nKeep it neutral for unwrapped (non-tiling) textures."
+				tooltip:"Every Bitmap plugged in the converted materials becomes a VRayBitmap (same file, coordinates and output).\nThe old Bitmap is not modified: other materials using it keep it."
+			checkbox chkRandomizer "VRayUVWRandomizer per material" checked:true offset:[14,0] \
+				tooltip:"Each material gets its own VRayUVWRandomizer, shared by all its VRayBitmaps (mapSource).\nKeep it neutral for unwrapped (non-tiling) textures."
 			checkbox chkNormalBump "Normal Bump -> VRayNormalMap" checked:true \
 				tooltip:"Rebuilds a Normal Bump as a VRayNormalMap (same maps, multipliers and flips)."
 			checkbox chkWrapNormal "Bump bitmap named *normal* -> normal map" checked:true \
@@ -275,8 +286,22 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 			)
 		)
 
-		fn markData m = (if m != undefined do collectBitmaps m dataBitmaps #())
-		fn markColor m = (if m != undefined do collectBitmaps m colorBitmaps #())
+		fn markData m =
+		(
+			if m != undefined do
+			(
+				collectBitmaps m dataBitmaps #()
+				collectBitmaps m mData #()
+			)
+		)
+		fn markColor m =
+		(
+			if m != undefined do
+			(
+				collectBitmaps m colorBitmaps #()
+				collectBitmaps m mColor #()
+			)
+		)
 
 		-- Colour management of the scene: #(isOcio, rawColourSpaceName)
 		-- 3ds Max 2024+ has OCIO; before that, or in gamma mode, the old
@@ -366,7 +391,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 				if sc == material or sc == modifier or sc == light or sc == GeometryClass or \
 					sc == shape or sc == helper or sc == camera then
 					appendIfUnique acc d
-				else if depth < 8 and not (isValidNode d) do
+				else if depth < 32 and not (isValidNode d) do
 					ownerMaterials d acc visited (depth + 1)
 			)
 		)
@@ -410,47 +435,40 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 			c
 		)
 
-		-- The VRayUVWRandomizer shared by every VRayBitmap. One already in the
-		-- scene under the same name (an earlier run) is reused, so all the
-		-- converted assets answer to the same settings.
-		fn sharedRandomizer =
+		-- The VRayUVWRandomizer of the material being converted, shared by all
+		-- its VRayBitmaps. One per material: two materials never share one.
+		fn materialRandomizer vm =
 		(
-			if rnd == undefined and not rndTried do
+			if matRnd == undefined and not rndWarned do
 			(
-				rndTried = true
-				local found = undefined
-				try
+				try (matRnd = VRayUVWRandomizer name:(vm.name + " UVW randomizer")) catch (matRnd = undefined)
+				if matRnd == undefined then
 				(
-					for r in (getClassInstances VRayUVWRandomizer) while found == undefined do
-						if r.name == rndName do found = r
-				)
-				catch (found = undefined)
-				if found != undefined then
-				(
-					rnd = found
-					logLine ("    shared randomizer: \"" + rndName + "\" already in the scene, reused")
+					if not rndWarned do
+					(
+						rndWarned = true
+						warn "VRayUVWRandomizer not available on this V-Ray: VRayBitmaps left without randomizer"
+					)
 				)
 				else
 				(
-					try (rnd = VRayUVWRandomizer name:rndName) catch (rnd = undefined)
-					if rnd == undefined then
-						warn "VRayUVWRandomizer not available on this V-Ray: VRayBitmaps left without randomizer"
-					else
+					logLine ("    randomizer \"" + matRnd.name + "\" created for this material")
+					if not rndDumped do
 					(
-						logLine ("    shared randomizer: \"" + rndName + "\" created with V-Ray's default settings")
-						warn ("check the randomizer settings: random offset / rotation / scale misplace unwrapped (non-tiling) textures")
 						-- its defaults, so the first tests tell us what they are
+						rndDumped = true
+						warn ("check the randomizer settings: random offset / rotation / scale misplace unwrapped (non-tiling) textures")
 						local row = "     "
-						for p in (getPropNames rnd) do
+						for p in (getPropNames matRnd) do
 						(
-							local v = getP rnd p
+							local v = getP matRnd p
 							if v != undefined and not (isMap v) do row += " " + (p as string) + "=" + (fmtVal v)
 						)
 						logLine row
 					)
 				)
 			)
-			rnd
+			matRnd
 		)
 
 		-- Copies every property two objects share; quiet on what does not fit
@@ -482,9 +500,11 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 		-- Transfer function (color_space): 0 none, 1 inverse gamma, 2 sRGB,
 		-- 3 from 3ds Max. Data maps get none (linear); colour maps get "from
 		-- 3ds Max", so Max's colour management decides per file (8-bit sRGB,
-		-- EXR linear) as it did for the Bitmap. RGB primaries are left on
-		-- Default, which converts nothing.
-		fn makeVRayBitmap bt isData =
+		-- EXR linear) as it did for the Bitmap. RGB primaries (rgbColorSpace):
+		-- 0 Default, 1 sRGB, 2 ACEScg, 3 Raw. They are left on
+		-- Default for colour maps; data maps get Raw (no conversion at all), as
+		-- Chaos recommends for bump, normal, displacement and roughness maps.
+		fn makeVRayBitmap bt isData vm =
 		(
 			local vb = vbClass name:bt.name
 			local f = ""
@@ -531,10 +551,21 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 				csLogged = true
 				logLine ("    VRayBitmap transfer function " + (cs0 as string) + " by default; set to 0 (none) for data maps, 3 (from 3ds Max) for colour maps")
 			)
-			-- the shared randomizer
+			if isData and chkLinear.checked do
+			(
+				local rgb0 = getP vb #rgbColorSpace
+				if not (setP vb #rgbColorSpace 3) then
+					warn ("\"" + bt.name + "\": RGB primaries not set to Raw")
+				else if not rgbLogged do
+				(
+					rgbLogged = true
+					logLine ("    VRayBitmap RGB primaries " + (rgb0 as string) + " by default; set to 3 (Raw) for data maps: check the VRayBitmap shows Raw")
+				)
+			)
+			-- the material's randomizer
 			if chkRandomizer.checked do
 			(
-				local r = sharedRandomizer()
+				local r = materialRandomizer vm
 				if r != undefined do
 				(
 					if not (setP vb #mapSource r) then
@@ -544,6 +575,135 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 				)
 			)
 			vb
+		)
+
+		-- The VRayBitmap standing for a Bitmap in the current material. One per
+		-- Bitmap and material: a Bitmap shared by two materials gives two
+		-- VRayBitmaps, each on its own material's randomizer. The Bitmap itself is
+		-- never modified. REPORT only says what would be done.
+		fn vbFor bt vm =
+		(
+			local r = bt
+			local idx = findItem vbSrc bt
+			if idx > 0 then
+				r = vbDst[idx]
+			else
+			(
+				local f = filenameFromPath (bitmapFile bt)
+				local inData = (findItem mData bt) > 0
+				local inColor = (findItem mColor bt) > 0
+				local isData = inData and not inColor
+				if inData and inColor do warn ("\"" + f + "\" is used as colour and as data: treated as colour")
+				local tag = if isData and chkLinear.checked then "  (data: transfer function none, primaries Raw)" else ""
+				if isDry then
+					logLine ("    would become a VRayBitmap: " + f + tag)
+				else
+				(
+					local vb = undefined
+					try (vb = makeVRayBitmap bt isData vm)
+					catch
+					(
+						warn ("\"" + f + "\" not converted to VRayBitmap: " + (getCurrentException()))
+						vb = undefined
+					)
+					if vb != undefined do
+					(
+						r = vb
+						bitmapsSwapped += 1
+						logLine ("    VRayBitmap: " + f + tag)
+					)
+				)
+				append vbSrc bt
+				append vbDst r
+				if r != bt or isDry do appendIfUnique vbMade bt
+			)
+			r
+		)
+
+		-- Puts VRayBitmaps in place of the Bitmaps plugged in a map we built
+		-- (the new VRayMtl, a new VRayNormalMap). A map reused as it is (Output,
+		-- Mix, a kept Normal Bump...) is left untouched: it may be shared, so the
+		-- Bitmaps inside it stay Bitmaps, and the log says so.
+		fn swapBitmapsIn parent vm =
+		(
+			local n = 0
+			try (n = getNumSubTexmaps parent) catch (n = 0)
+			for i = 1 to n do
+			(
+				local sm = undefined
+				try (sm = getSubTexmap parent i) catch (sm = undefined)
+				if sm != undefined do
+				(
+					if isKindOf sm BitmapTexture then
+					(
+						local nb = vbFor sm vm
+						if nb != sm do
+							try (setSubTexmap parent i nb)
+							catch (warn ("\"" + sm.name + "\": VRayBitmap could not be plugged: " + (getCurrentException())))
+					)
+					else if (findItem nrmDst sm) > 0 then
+						swapBitmapsIn sm vm
+					else
+					(
+						local inner = #()
+						collectBitmaps sm inner #()
+						if inner.count > 0 and (findItem keptWarned sm) == 0 do
+						(
+							append keptWarned sm
+							warn ("the Bitmaps inside " + ((classOf sm) as string) + " \"" + sm.name + "\" stay Bitmaps (that map is reused as it is)")
+						)
+					)
+				)
+			)
+		)
+
+		-- A map is dead when it has owners and every one of them is an old
+		-- Physical of the run (gone from the scene). Anything else -- a converted
+		-- VRayMtl, a material in a sample slot, a modifier, or no owner found at
+		-- all (environment...) -- keeps it alive: its Slate node is not touched.
+		fn isDead m olds =
+		(
+			local owners = #()
+			ownerMaterials m owners #() 0
+			local dead = owners.count > 0
+			for o in owners while dead do
+				if (findItem olds o) == 0 do dead = false
+			dead
+		)
+
+		-- Removes from the Slate views the nodes of the maps the conversion
+		-- replaced (old Bitmaps, old Normal Bumps) once nothing in use needs them,
+		-- so no cut-off node is left next to the new material.
+		fn cleanViews oldMaps olds =
+		(
+			local dead = for m in oldMaps where (isDead m olds) collect m
+			local removed = 0
+			if dead.count > 0 do
+			(
+				local nv = 0
+				try (nv = sme.GetNumViews()) catch (nv = 0)
+				for i = 1 to nv do
+				(
+					try
+					(
+						local v = sme.GetView i
+						-- a map shown twice in a view may need more than one pass
+						local pass = 0
+						local inView = for m in dead where (v.GetNodeByRef m) != undefined collect m
+						while inView.count > 0 and pass < 5 do
+						(
+							pass += 1
+							v.SelectNone()
+							v.SetSelectedNodes inView
+							v.DeleteSelection()
+							removed += inView.count
+							inView = for m in dead where (v.GetNodeByRef m) != undefined collect m
+						)
+					)
+					catch (warn ("Slate view " + (i as string) + " not cleaned: " + (getCurrentException())))
+				)
+			)
+			if removed > 0 do logLine ("    Slate: " + (removed as string) + " node(s) of replaced maps removed from the views")
 		)
 
 		----------------------------------------------------------------
@@ -568,8 +728,9 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 
 		-- Returns the map to plug in a V-Ray bump slot: a VRayNormalMap
 		-- rebuilt from a Normal Bump, a bitmap wrapped when its name says it is
-		-- a normal map, or the map unchanged. A map met twice gives the same
-		-- VRayNormalMap, so sharing between materials is kept.
+		-- a normal map, or the map unchanged. A map met twice in the same
+		-- material gives the same VRayNormalMap; each material gets its own
+		-- (the cache is reset for every material).
 		fn toVRayNormal m =
 		(
 			local r = m
@@ -609,6 +770,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 						setP nm #flip_green (((getAny m #(#flipgreen, #flip_green)) == true) or chkFlipGreen.checked)
 						setP nm #swap_red_and_green ((getAny m #(#swap_rg, #swap_red_green)) == true)
 						logLine ("    Normal Bump \"" + m.name + "\" -> VRayNormalMap" + (if (getP nm #flip_green) == true then ", green flipped" else ""))
+						appendIfUnique oldNormalBumps m
 						r = nm
 					)
 				)
@@ -625,6 +787,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 				(
 					append nrmSrc m
 					append nrmDst r
+					append builtMaps r
 				)
 			)
 			r
@@ -789,10 +952,20 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 		-- Builds the VRayMtl equivalent of a Physical Material. The Physical
 		-- is only read; the maps are reused as they are (same instances), never
 		-- copied, except Normal Bumps rebuilt as VRayNormalMap. Bitmaps become
-		-- VRayBitmaps afterwards, in processBitmaps.
+		-- VRayBitmaps at the end, in swapBitmapsIn.
 		fn convertMaterial pm =
 		(
 			usedProps = #()
+			-- one material at a time: its normal maps, VRayBitmaps and randomizer
+			-- are its own, never shared with another material
+			nrmSrc = #()
+			nrmDst = #()
+			nrmKept = #()
+			mData = #()
+			mColor = #()
+			vbSrc = #()
+			vbDst = #()
+			matRnd = undefined
 			local vm = VRayMtl name:pm.name
 			local m = undefined
 			try (vm.effectsChannel = pm.effectsChannel) catch ()
@@ -1115,92 +1288,60 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 				)
 			)
 
+			-- Bitmaps -> VRayBitmaps, inside the maps built for this material only
+			if chkVRayBitmap.checked and vbClass != undefined do swapBitmapsIn vm vm
+
 			vm
 		)
 
-		-- Bitmaps of the run, once every material is converted: swapped for
-		-- VRayBitmaps, or (option off, or a Bitmap shared outside the run) data
-		-- maps reloaded linear in place
-		fn processBitmaps cm dryRun allowed =
+		-- Data Bitmaps that stay Bitmaps in the new materials (VRayBitmap option
+		-- off, or a Bitmap inside a map reused as it is, like a kept Normal Bump)
+		-- are reloaded linear in place, unless something outside the run also
+		-- uses them
+		fn linearFallback cm dryRun olds news =
 		(
-			local bmps = #()
-			for b in dataBitmaps do appendIfUnique bmps b
-			for b in colorBitmaps do appendIfUnique bmps b
-			local useVB = chkVRayBitmap.checked and vbClass != undefined
-			local how = if cm[1] then
-				(if cm[2] != undefined then ("OCIO, colour space \"" + cm[2] + "\"") else "OCIO, no Raw colour space found")
-			else
-				"gamma 1.0"
-			logLine ""
-			if useVB then
-				logLine ("Bitmaps -> VRayBitmap" + (if chkRandomizer.checked then ", shared randomizer" else "") + \
-					(if chkLinear.checked then ", data maps linear" else ""))
-			else
-				logLine ("Bitmaps kept" + (if chkLinear.checked then ", data maps in linear (" + how + ")" else ""))
-			if chkVRayBitmap.checked and vbClass == undefined do warn "no VRayBitmap class on this V-Ray: bitmaps kept as Bitmap"
-			if bmps.count == 0 do logLine "    none"
-			if useVB and dryRun and chkRandomizer.checked and bmps.count > 0 do
-				logLine ("    would share one VRayUVWRandomizer, \"" + rndName + "\"")
-			local swapped = 0
-			for bt in bmps where useVB or (chkLinear.checked and (findItem dataBitmaps bt) > 0) do
+			local allowed = olds + news
+			local kept = #()
+			-- (in REPORT nothing is swapped yet: skip the ones that would get a VRayBitmap)
+			for bt in dataBitmaps where not (dryRun and (findItem vbMade bt) > 0) do
+			(
+				local owners = #()
+				ownerMaterials bt owners #() 0
+				local inNew = false
+				for o in owners while not inNew do if (findItem news o) > 0 do inNew = true
+				if inNew do append kept bt
+			)
+			if kept.count > 0 do
+			(
+				local how = if cm[1] then
+					(if cm[2] != undefined then ("OCIO, colour space \"" + cm[2] + "\"") else "OCIO, no Raw colour space found")
+				else
+					"gamma 1.0"
+				logLine ""
+				logLine ("Data maps that stay Bitmaps, reloaded linear (" + how + ")")
+			)
+			for bt in kept do
 			(
 				local f = filenameFromPath (bitmapFile bt)
-				local inData = (findItem dataBitmaps bt) > 0
 				local inColor = (findItem colorBitmaps bt) > 0
-				local isData = inData and not inColor
-				if inData and inColor do warn ("\"" + f + "\" is used as colour and as data: treated as colour")
-				local outside = usedOutsideRun bt allowed
-				if outside != undefined then
+				local outside = if inColor then undefined else (usedOutsideRun bt allowed)
+				if inColor then
+					warn ("\"" + f + "\" is also used in a colour slot: left as it is")
+				else if outside != undefined then
 					warn ("\"" + f + "\" is also used by " + (userName outside) + ", not converted here: left as it is")
-				else if useVB then
+				else if cm[1] and cm[2] == undefined then
+					warn ("\"" + f + "\" left as it is (no Raw colour space in the OCIO config)")
+				else if dryRun then
+					logLine ("    would be read as data: " + f)
+				else
 				(
-					local tag = if isData and chkLinear.checked then "  (data: transfer function none)" else ""
-					if dryRun then
-						logLine ("    would become a VRayBitmap: " + f + tag)
+					local res = linearize bt cm[2]
+					if res[1] then
+						logLine ("    read as data: " + f + (if res[2] != "" then "  (" + res[2] + ")" else ""))
 					else
-					(
-						local vb = undefined
-						try (vb = makeVRayBitmap bt isData)
-						catch
-						(
-							warn ("\"" + f + "\" not converted to VRayBitmap: " + (getCurrentException()))
-							vb = undefined
-						)
-						if vb != undefined do
-						(
-							local ok = true
-							try (replaceInstances bt vb)
-							catch
-							(
-								ok = false
-								warn ("\"" + f + "\" could not be swapped for its VRayBitmap: " + (getCurrentException()))
-							)
-							if ok do
-							(
-								swapped += 1
-								logLine ("    VRayBitmap: " + f + tag)
-							)
-						)
-					)
-				)
-				else if isData and chkLinear.checked do
-				(
-					if cm[1] and cm[2] == undefined then
-						warn ("\"" + f + "\" left as it is (no Raw colour space in the OCIO config)")
-					else if dryRun then
-						logLine ("    would be read as data: " + f)
-					else
-					(
-						local res = linearize bt cm[2]
-						if res[1] then
-							logLine ("    read as data: " + f + (if res[2] != "" then "  (" + res[2] + ")" else ""))
-						else
-							warn ("\"" + f + "\" not reloaded: " + res[2])
-					)
+						warn ("\"" + f + "\" not reloaded: " + res[2])
 				)
 			)
-			bitmapsSwapped = swapped
-			swapped
 		)
 
 		-- The work itself, called inside an undo block for CONVERT
@@ -1208,6 +1349,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 		(
 			local olds = #()
 			local news = #()
+			local swapped = #()   -- the Physicals actually replaced (gone from the scene)
 			local converted = 0
 			for pm in phys do
 			(
@@ -1241,28 +1383,35 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 						ok = false
 						warn ("\"" + olds[i].name + "\" could not be replaced: " + (getCurrentException()))
 					)
-					if ok do converted += 1
+					if ok do
+					(
+						converted += 1
+						append swapped olds[i]
+					)
 				)
 			)
-			-- Normal Bumps rebuilt as VRayNormalMap are swapped everywhere they
-			-- are used (the orphaned Physicals, the Slate views), so no dead
-			-- Normal Bump is left behind. Not when something outside the run
-			-- still uses it. A wrapped bitmap is never swapped: its VRayNormalMap
-			-- contains it.
+			if chkLinear.checked do linearFallback cm dryRun olds news
+			-- the old Bitmaps and Normal Bumps are not modified (other materials may
+			-- use them); their cut-off nodes are taken out of the Slate views
 			if not dryRun do
 			(
-				for i = 1 to nrmSrc.count where classOf nrmSrc[i] == Normal_Bump do
+				local oldMaps = #()
+				for b in dataBitmaps do appendIfUnique oldMaps b
+				for b in colorBitmaps do appendIfUnique oldMaps b
+				for b in oldNormalBumps do appendIfUnique oldMaps b
+				cleanViews oldMaps swapped
+			)
+			-- REPORT built throw-away VRayMtls and VRayNormalMaps: let go of the
+			-- scene's maps they point to, so they never count as users later
+			if dryRun do
+			(
+				for t in (news + builtMaps) do
 				(
-					local outside = usedOutsideRun nrmSrc[i] (olds + news)
-					if outside != undefined then
-						logLine ("    Normal Bump \"" + nrmSrc[i].name + "\" also used by " + (userName outside) + ": kept for it")
-					else
-						try (replaceInstances nrmSrc[i] nrmDst[i])
-						catch (warn ("Normal Bump \"" + nrmSrc[i].name + "\" could not be swapped for its VRayNormalMap: " + (getCurrentException())))
+					local n = 0
+					try (n = getNumSubTexmaps t) catch (n = 0)
+					for i = 1 to n do try (setSubTexmap t i undefined) catch ()
 				)
 			)
-			-- bitmaps may be shared by the materials of this run only
-			processBitmaps cm dryRun (olds + news)
 			-- viewport display, once the maps are final
 			if not dryRun do
 				for vm in news where (getP vm #texmap_diffuse) != undefined do try (showTextureMap vm true) catch ()
@@ -1285,8 +1434,14 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 			warnCount = 0
 			hasVRayNormal = vrayNormalAvailable()
 			vbClass = vrayBitmapClass()
-			rnd = undefined
-			rndTried = false
+			isDry = dryRun
+			rndWarned = false
+			rndDumped = false
+			keptWarned = #()
+			oldNormalBumps = #()
+			vbMade = #()
+			builtMaps = #()
+			rgbLogged = false
 			mtLogged = false
 			csLogged = false
 			nrmSrc = #()
