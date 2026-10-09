@@ -7,7 +7,7 @@
 	FBX -> Physical Material on import), works on any Physical Material.
 
 	Author   : /ai.oli collective
-	Version  : 1.3 (in test)
+	Version  : 1.4 (in test)
 	Compat.  : 3ds Max 2017+ (Physical Material) with V-Ray 5+ (metalness,
 	           roughness mode, coat, sheen). Written for 3ds Max 2026 / V-Ray 7.
 	Usage    : Scripting > Run Script, or drag & drop into 3ds Max. The script
@@ -22,6 +22,12 @@
 	VRayUVWRandomizer, each material has its own. Normal maps get their
 	green channel flipped by default: V-Ray for 3ds Max reads them as
 	DirectX (Y-), Blender writes OpenGL (Y+).
+
+	The other way round (1.4): the VRayMtl of the selection become Physical
+	Materials, VRayBitmaps become Bitmaps and VRayNormalMaps Normal Bumps, so
+	an FBX or glTF export opens in Blender with its textures. EXPORT does it
+	for the export only and leaves the scene as it was; CONVERT IN SCENE does
+	it in the scene, in a single undo.
 -----------------------------------------------------------------------------*/
 
 global aioli_roPhys2Vray      -- the tool window
@@ -68,11 +74,24 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 		local mtLogged = false       -- VRayBitmap default mapping type reported once per run
 		local csLogged = false       -- VRayBitmap default transfer function reported once per run
 		local rgbLogged = false      -- VRayBitmap default RGB primaries reported once per run
+		-- V-Ray -> Physical (export to Blender)
+		local rvMapSrc = #()        -- maps met in the VRayMtls...
+		local rvMapData = #()       -- ...read as data or as colour...
+		local rvMapDst = #()        -- ...and what the Physical gets for each
+		local rvBuilt = #()         -- maps built in the run (Bitmaps, Normal Bumps)
+		local rvMatSrc = #()        -- export: materials met on the selection...
+		local rvMatDst = #()        -- ...and the material exported in their place
+		local rvObjs = #()          -- export: objects given a temporary material...
+		local rvObjMats = #()       -- ...and their own material, put back after the export
+		local rvUsed = #()          -- VRayMtl map slots dealt with, current material
+		local rvRndWarned = false
+		local rvConverted = 0       -- VRayMtls converted in the run
 
 		----------------------------------------------------------------
 		-- UI
 		----------------------------------------------------------------
 		label lblSel "" align:#left width:280
+		label lblFwd "PHYSICAL -> V-RAY   (imports from Blender)" align:#left offset:[0,4]
 
 		group "Reflection"
 		(
@@ -103,7 +122,26 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 
 		button btnReport "REPORT" width:136 height:30 across:2 \
 			tooltip:"Prints what each Physical holds and what CONVERT would do. Changes nothing."
-		button btnGo "CONVERT" width:136 height:30
+		button btnGo "CONVERT TO V-RAY" width:136 height:30 \
+			tooltip:"Replaces the Physical Materials of the selection with VRayMtl, in a single undo."
+
+		label lblRev "V-RAY -> PHYSICAL   (exports to Blender)" align:#left offset:[0,10]
+		group "Export"
+		(
+			checkbox chkFbx "FBX" checked:true across:2 \
+				tooltip:"Writes an .fbx of the selection."
+			checkbox chkGlb "glTF binary (.glb)" checked:true \
+				tooltip:"Writes a .glb of the selection next to the .fbx (3ds Max 2023+ glTF exporter).\nBlender rebuilds roughness, metalness, normal and alpha from a glTF more faithfully than from an FBX."
+			checkbox chkEmbed "Embed textures in the FBX" checked:true \
+				tooltip:"Embed Media: the .fbx carries its textures, Blender unpacks them on import.\nThe FBX exporter's own setting is put back after the export."
+			checkbox chkUnwrap "Plug the texture found inside other maps" checked:true \
+				tooltip:"FBX and glTF only carry plain bitmaps: an Output, Color Correction, Triplanar... is lost on the way.\nOn: a map holding a single texture is replaced by that texture (what the map did is lost, the log says so).\nOff: the map is plugged as it is, and Blender will not see its texture."
+		)
+		button btnExport "EXPORT SELECTION..." width:136 height:30 across:2 \
+			tooltip:"Gives the selection Physical Materials for the export only, writes the FBX / .glb,\nthen puts the VRayMtl back. The scene is left as it was, nothing goes to the undo stack."
+		button btnToPhys "CONVERT IN SCENE" width:136 height:30 \
+			tooltip:"Replaces the VRayMtl of the selection with Physical Materials in the scene,\nin a single undo (Ctrl+Z to go back). Export it yourself afterwards."
+
 		label lblStatus "" align:#left width:280 height:28
 
 		----------------------------------------------------------------
@@ -1419,14 +1457,818 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 		)
 
 		----------------------------------------------------------------
+		-- V-RAY -> PHYSICAL (export to Blender)
+		-- FBX and glTF exporters know the Physical Material, Bitmaps and
+		-- Normal Bumps, not V-Ray's own classes. The VRayMtl is only read;
+		-- what the Physical needs is built next to it, V-Ray maps are never
+		-- modified.
+		----------------------------------------------------------------
+		fn pct v = (((v + 0.5) as integer) as string) + "%"
+
+		-- Bitmap or VRayBitmap (VRayHDRI on older V-Ray)
+		fn isImageMap m =
+		(
+			local r = false
+			if m != undefined do
+			(
+				if isKindOf m BitmapTexture then
+					r = true
+				else
+				(
+					local cn = (classOf m) as string
+					r = (cn == "VRayBitmap" or cn == "VRayHDRI")
+				)
+			)
+			r
+		)
+
+		-- Every image map under a map (not the map itself, not inside an image)
+		fn collectImages m acc visited =
+		(
+			if m != undefined and (findItem visited m) == 0 do
+			(
+				append visited m
+				local n = 0
+				try (n = getNumSubTexmaps m) catch (n = 0)
+				for i = 1 to n do
+				(
+					local sm = undefined
+					try (sm = getSubTexmap m i) catch (sm = undefined)
+					if isImageMap sm then
+						appendIfUnique acc sm
+					else
+						collectImages sm acc visited
+				)
+			)
+		)
+
+		-- A Bitmap reading the same file the same way as a VRayBitmap. Data maps
+		-- are read in linear in Max too (Blender sets its own colour spaces on
+		-- import, this is for the Max viewport and render).
+		fn rvBitmap vb isData cm =
+		(
+			local f = getP vb #HDRIMapName
+			if f == undefined do f = ""
+			if f != "" and not (doesFileExist f) do
+			(
+				local ff = ""
+				try (ff = mapPaths.getFullFilePath f) catch (ff = "")
+				if ff != undefined and ff != "" do f = ff
+			)
+			local bt = Bitmaptexture name:vb.name
+			if f == "" then
+				warn ("\"" + vb.name + "\": the VRayBitmap has no file")
+			else if not (setP bt #filename f) do
+				warn ("\"" + vb.name + "\": file not set on the Bitmap: " + f)
+			-- tiling, offset, angle, map channel, blur
+			local vc = getP vb #coords
+			local bc = getP bt #coords
+			if vc != undefined and bc != undefined then copyProps vc bc
+			else warn ("\"" + vb.name + "\": UVW coordinates not copied")
+			-- output (RGB level, invert, curve)
+			local vo = getP vb #output
+			local bo = getP bt #output
+			if vo != undefined and bo != undefined do copyProps vo bo
+			-- what the mono / RGB outputs read (an alpha cutout reads the alpha)
+			for p in #(#monoOutput, #rgbOutput, #alphaSource) do
+			(
+				local v = getP vb p
+				if (isKindOf v Number) and v != 0 and not (setP bt p v) do
+					warn ("\"" + vb.name + "\": " + (p as string) + " " + (v as string) + " not set on the Bitmap")
+			)
+			local mt = getP vb #maptype
+			if (isKindOf mt Number) and mt != 4 do
+				warn ("\"" + vb.name + "\": mapping type " + (mt as string) + ", not 3ds Max standard (UVW): the Bitmap reads the UVs")
+			if (getP vb #mapSource) != undefined and not rvRndWarned do
+			(
+				rvRndWarned = true
+				warn "UVW randomizers are not carried over: the Bitmaps read the plain UVs (FBX, glTF and Blender do not know them)"
+			)
+			local cs = getP vb #color_space
+			local lin = (isData or cs == 0) and f != "" and (doesFileExist f)
+			if lin do
+			(
+				if cm[1] and cm[2] == undefined then
+					warn ("\"" + (filenameFromPath f) + "\" not read as linear (no Raw colour space in the OCIO config)")
+				else
+				(
+					local res = linearize bt cm[2]
+					if not res[1] do warn ("\"" + (filenameFromPath f) + "\" not read as linear: " + res[2])
+				)
+			)
+			logLine ("    VRayBitmap -> Bitmap: " + (if f == "" then "(no file)" else (filenameFromPath f)) + \
+				(if f != "" and not (doesFileExist f) then "  MISSING" else "") + (if lin then "  (linear)" else ""))
+			append rvBuilt bt
+			bt
+		)
+
+		-- What a Physical slot gets for a map found in a VRayMtl: something FBX
+		-- and glTF exporters understand. A Bitmap is reused as it is; a
+		-- VRayBitmap becomes a Bitmap; a VRayNormalMap becomes a Normal Bump (a
+		-- Normal Bump holding VRayBitmaps is rebuilt too); a map wrapping a single
+		-- texture can be replaced by that texture (option). Cached for the run.
+		fn exportMap m isData cm =
+		(
+			local r = m
+			if m != undefined and not (isKindOf m BitmapTexture) do
+			(
+				-- one entry per map and reading: a VRayBitmap used as colour and as
+				-- data gives two Bitmaps, one read linear
+				local idx = 0
+				for i = 1 to rvMapSrc.count while idx == 0 do
+					if rvMapSrc[i] == m and rvMapData[i] == isData do idx = i
+				if idx > 0 then
+					r = rvMapDst[idx]
+				else
+				(
+					local cn = (classOf m) as string
+					if cn == "VRayBitmap" or cn == "VRayHDRI" then
+						r = rvBitmap m isData cm
+					else if cn == "VRayNormalMap" or classOf m == Normal_Bump then
+					(
+						local isV = (cn == "VRayNormalMap")
+						local nIn = getP m #normal_map
+						local bIn = getP m #bump_map
+						local nOut = exportMap nIn true cm
+						local bOut = exportMap bIn true cm
+						-- the green flip says how the file was written: flipped = OpenGL
+						local green = if isV then ((getP m #flip_green) == true) else ((getAny m #(#flipgreen, #flip_green)) == true)
+						if nIn != undefined and not green do
+							warn ("normal map \"" + m.name + "\" is read without green flip, so its file is DirectX: Blender reads OpenGL, its green will be inverted there")
+						local space = if isV then (getP m #normal_map_type) else (getP m #method)
+						if (isKindOf space Number) and space != 0 do
+							warn ("normal map \"" + m.name + "\" is not in tangent space: Blender expects tangent space")
+						if isV or nOut != nIn or bOut != bIn then
+						(
+							local nb = Normal_Bump name:m.name
+							if isV then
+							(
+								setP nb #map1on ((getP m #normal_map_on) != false)
+								setP nb #mult_spin (getP m #normal_map_multiplier)
+								setP nb #map2on ((getP m #bump_map_on) != false)
+								setP nb #bump_spin (getP m #bump_map_multiplier)
+								-- Normal Bump and VRayNormalMap read the same convention:
+								-- the flips carry over as they are
+								local fr = firstProp nb #(#flipred, #flip_red)
+								local fg = firstProp nb #(#flipgreen, #flip_green)
+								local sw = firstProp nb #(#swap_rg, #swap_red_green)
+								if fr != undefined do setP nb fr ((getP m #flip_red) == true)
+								if fg != undefined do setP nb fg green
+								if sw != undefined do setP nb sw ((getP m #swap_red_and_green) == true)
+								-- same numbering: 0 tangent, 1 object, 2 screen, 3 world
+								if isKindOf space Number do setP nb #method space
+							)
+							else
+								copyProps m nb
+							setP nb #normal_map nOut
+							setP nb #bump_map bOut
+							logLine ("    " + cn + " \"" + m.name + "\" -> Normal Bump" + (if green then ", green flipped" else ""))
+							append rvBuilt nb
+							r = nb
+						)
+					)
+					else
+					(
+						-- another map: exporters only carry plain bitmaps
+						local imgs = #()
+						collectImages m imgs #()
+						if chkUnwrap.checked and imgs.count == 1 then
+						(
+							r = exportMap imgs[1] isData cm
+							warn (cn + " \"" + m.name + "\" left out, the texture inside plugged directly: what the " + cn + " did is lost")
+						)
+						else
+						(
+							local nv = 0
+							for i in imgs where not (isKindOf i BitmapTexture) do nv += 1
+							warn (cn + " \"" + m.name + "\" plugged as it is: FBX / glTF only carry plain bitmaps, Blender will not see it" + \
+								(if nv > 0 then " (the VRayBitmaps inside stay VRayBitmaps)" else ""))
+						)
+					)
+					append rvMapSrc m
+					append rvMapData isData
+					append rvMapDst r
+				)
+			)
+			r
+		)
+
+		fn vOn vm slot = ((getP vm ((slot + "_on") as name)) != false)
+		fn vMult vm slot = num (getP vm ((slot + "_multiplier") as name)) 100.0
+
+		-- Puts the export version of a VRayMtl map into a Physical slot, keeps
+		-- the V-Ray on/off state, logs it. Returns true when plugged.
+		fn pplug pm pslot m vm vslot isData cm warnAmount:true =
+		(
+			local ok = false
+			appendIfUnique rvUsed (toLower vslot)
+			if m != undefined do
+			(
+				local em = exportMap m isData cm
+				if em != undefined do
+				(
+					if not (setP pm (pslot as name) em) then
+						warn (vslot + ": no " + pslot + " slot on this Physical Material")
+					else
+					(
+						ok = true
+						local isOn = vOn vm vslot
+						if not isOn do setP pm ((pslot + "_on") as name) false
+						logLine ("    " + vslot + " -> " + pslot + (if isOn then "" else " [off]") + "   " + (describeMap em 1))
+						local mul = vMult vm vslot
+						if warnAmount and isOn and mul < 99.9 do
+							warn (vslot + " amount " + (pct mul) + " not carried: the map is plugged at 100%")
+					)
+				)
+			)
+			ok
+		)
+
+		-- Builds the Physical Material equivalent of a VRayMtl. The VRayMtl is
+		-- only read.
+		fn toPhysical vm cm =
+		(
+			rvUsed = #()
+			local pm = PhysicalMaterial name:vm.name
+			try (pm.effectsChannel = vm.effectsChannel) catch ()
+			-- Advanced mode: reflectivity and reflection colour are read
+			setP pm #material_mode 1
+			local useRough = (getP vm #brdf_useRoughness) == true
+
+			-- base -------------------------------------------------------
+			local dc = getP vm #diffuse
+			if isKindOf dc Color do setP pm #base_color dc
+			setP pm #base_weight 1.0
+			if (pplug pm "base_color_map" (getP vm #texmap_diffuse) vm "texmap_diffuse" false cm warnAmount:false) and (vOn vm "texmap_diffuse") do
+			(
+				local dm = vMult vm "texmap_diffuse"
+				if dm < 99.9 do
+				(
+					-- a black swatch + map amount is a weight on the map
+					if isBlack dc then
+					(
+						setP pm #base_weight (dm / 100.0)
+						setP pm #base_color white
+						logLine ("    diffuse map amount " + (pct dm) + " on a black swatch -> base weight " + (fmtVal (dm / 100.0)))
+					)
+					else
+						warn ("texmap_diffuse amount " + (pct dm) + " blends with the colour swatch: not carried, the map is plugged at 100%")
+				)
+			)
+			setP pm #diff_roughness (num (getP vm #diffuse_roughness) undefined)
+			pplug pm "diff_rough_map" (getP vm #texmap_roughness) vm "texmap_roughness" true cm
+
+			-- reflection -------------------------------------------------
+			if (getP vm #reflection_fresnel) == false do
+				warn "reflection without Fresnel: the Physical always applies Fresnel, reflections get weaker facing the camera"
+			local rc = getP vm #reflection
+			local rMap = getP vm #texmap_reflection
+			-- a map switched off leaves the swatch in charge, as in V-Ray
+			local rOn = rMap != undefined and (vOn vm "texmap_reflection")
+			pplug pm "refl_color_map" rMap vm "texmap_reflection" false cm
+			if rOn then
+			(
+				setP pm #reflectivity 1.0
+				setP pm #refl_color white
+			)
+			else if isKindOf rc Color do
+			(
+				-- V-Ray reflection colour = Physical reflectivity x reflection colour
+				local mx = amax #(rc.r, rc.g, rc.b)
+				if mx < 0.5 then
+					setP pm #reflectivity 0.0
+				else
+				(
+					setP pm #reflectivity (mx / 255.0)
+					setP pm #refl_color (rc * (255.0 / mx))
+				)
+			)
+
+			-- IOR: the Physical has one, for reflection and refraction ------
+			local lock = (getP vm #reflection_lockIOR) != false
+			local tIor = num (getP vm #refraction_ior) undefined
+			local rIor = num (getP vm #reflection_ior) undefined
+			local ior = if lock or rIor == undefined then tIor else rIor
+			setP pm #trans_ior ior
+			local iorSlot = if lock then "texmap_refractionIOR" else "texmap_reflectionIOR"
+			pplug pm "trans_ior_map" (getP vm (iorSlot as name)) vm iorSlot true cm
+
+			-- roughness --------------------------------------------------
+			local g = num (getP vm #reflection_glossiness) undefined
+			local gMap = getP vm #texmap_reflectionGlossiness
+			if gMap == undefined or useRough then
+			(
+				-- a value alone is turned into a roughness: what every exporter reads
+				setP pm #roughness_inv false
+				setP pm #roughness (conv g useRough true)
+			)
+			else
+			(
+				setP pm #roughness_inv true
+				setP pm #roughness g
+				warn "glossiness map (V-Ray roughness mode off): the Physical reads it with Inv on, FBX / glTF may drop that flag: in Blender, check the map is inverted"
+			)
+			pplug pm "roughness_map" gMap vm "texmap_reflectionGlossiness" true cm
+
+			-- metalness --------------------------------------------------
+			setP pm #metalness (num (getP vm #reflection_metalness) 0.0)
+			pplug pm "metalness_map" (getP vm #texmap_metalness) vm "texmap_metalness" true cm
+
+			-- refraction -------------------------------------------------
+			local fc = getP vm #refraction
+			local fMap = getP vm #texmap_refraction
+			local tr = 0.0
+			local tc = white
+			if isKindOf fc Color do
+			(
+				local mx = amax #(fc.r, fc.g, fc.b)
+				tr = mx / 255.0
+				if mx > 0.5 do tc = fc * (255.0 / mx)
+			)
+			local fOn = fMap != undefined and (vOn vm "texmap_refraction")
+			if not fOn and fMap != undefined do
+				pplug pm "trans_color_map" fMap vm "texmap_refraction" false cm
+			if fOn or tr > 0.001 do
+			(
+				-- IOR unlocked: the reflection one was kept above
+				if not lock and rIor != undefined and tIor != undefined and (abs (rIor - tIor)) > 0.001 do
+					warn ("IOR unlocked: reflection IOR " + (fmtVal rIor) + " kept, refraction IOR " + (fmtVal tIor) + " lost (the Physical has one IOR)")
+				if fOn then
+				(
+					setP pm #transparency 1.0
+					pplug pm "trans_color_map" fMap vm "texmap_refraction" false cm
+				)
+				else
+				(
+					setP pm #transparency tr
+					setP pm #trans_color tc
+					logLine ("    refraction " + (fmtVal fc) + " -> transparency " + (fmtVal tr) + ", colour " + (fmtVal tc))
+				)
+				-- fog: the colour reached at a depth
+				local fogC = getP vm #refraction_fogColor
+				local fogMap = getP vm #texmap_refraction_fog
+				if fogMap != undefined or ((isKindOf fogC Color) and not (isWhite fogC)) do
+				(
+					if fOn or not (isWhite tc) then
+						warn "refraction colour and fog colour both set: the Physical has one transparency colour, the refraction one is kept"
+					else
+					(
+						local depth = num (getP vm #refraction_fogDepth) undefined
+						if depth == undefined do
+						(
+							local fm = num (getP vm #refraction_fogMult) 0.0
+							if fm > 0.0 do depth = 1.0 / fm
+						)
+						if isKindOf fogC Color do setP pm #trans_color fogC
+						if depth != undefined do setP pm #trans_depth depth
+						logLine ("    fog colour" + (if depth != undefined then " at depth " + (fmtVal depth) else "") + " -> transparency colour and depth")
+						pplug pm "trans_color_map" fogMap vm "texmap_refraction_fog" false cm
+					)
+				)
+				-- refraction roughness: locked to the reflection when they match
+				local rg = num (getP vm #refraction_glossiness) undefined
+				local rgMap = getP vm #texmap_refractionGlossiness
+				if rgMap == gMap and rg != undefined and g != undefined and (abs (rg - g)) < 0.001 then
+				(
+					setP pm #trans_roughness_lock true
+					appendIfUnique rvUsed "texmap_refractionglossiness"
+				)
+				else
+				(
+					setP pm #trans_roughness_lock false
+					if rgMap == undefined or useRough then
+					(
+						setP pm #trans_roughness_inv false
+						setP pm #trans_roughness (conv rg useRough true)
+					)
+					else
+					(
+						setP pm #trans_roughness_inv true
+						setP pm #trans_roughness rg
+					)
+					pplug pm "trans_rough_map" rgMap vm "texmap_refractionGlossiness" true cm
+				)
+				if (getP vm #refraction_thinWalled) == true do setP pm #thin_walled true
+				warn "refraction: Blender reads an FBX transparency as alpha (see-through), not as glass: check it after the import"
+			)
+
+			-- opacity ----------------------------------------------------
+			pplug pm "cutout_map" (getP vm #texmap_opacity) vm "texmap_opacity" true cm
+
+			-- self-illumination ------------------------------------------
+			local sc = getP vm #selfIllumination
+			local sSlot = firstProp vm #(#texmap_self_illumination, #texmap_selfIllumination)
+			local sMap = if sSlot != undefined then (getP vm sSlot) else undefined
+			if sMap != undefined or ((isKindOf sc Color) and not (isBlack sc)) do
+			(
+				-- the ratio Chaos' V-Ray -> Physical converter uses (V2A, E. Lecchi)
+				local sm = num (getP vm #selfIllumination_multiplier) 1.0
+				setP pm #emission 1.0
+				setP pm #emit_color (if isKindOf sc Color then sc else white)
+				setP pm #emit_luminance (sm * 477.464)
+				logLine ("    self-illumination x" + (fmtVal sm) + " -> emission, luminance " + (fmtVal (sm * 477.464)) + " cd/m2")
+				if sSlot != undefined do pplug pm "emit_color_map" sMap vm (sSlot as string) false cm
+			)
+
+			-- coat -------------------------------------------------------
+			local ca = num (getP vm #coat_amount) 0.0
+			local caMap = getP vm #texmap_coat_amount
+			if ca > 0.0 or caMap != undefined do
+			(
+				setP pm #coating ca
+				local cc = getP vm #coat_color
+				if isKindOf cc Color do setP pm #coat_color cc
+				local cg = num (getP vm #coat_glossiness) undefined
+				local cgMap = getP vm #texmap_coat_glossiness
+				if cgMap == undefined or useRough then
+				(
+					setP pm #coat_roughness_inv false
+					setP pm #coat_roughness (conv cg useRough true)
+				)
+				else
+				(
+					setP pm #coat_roughness_inv true
+					setP pm #coat_roughness cg
+				)
+				setP pm #coat_ior (num (getP vm #coat_ior) undefined)
+				pplug pm "coat_map" caMap vm "texmap_coat_amount" true cm
+				pplug pm "coat_color_map" (getP vm #texmap_coat_color) vm "texmap_coat_color" false cm
+				pplug pm "coat_rough_map" cgMap vm "texmap_coat_glossiness" true cm
+				if (pplug pm "coat_bump_map" (getP vm #texmap_coat_bump) vm "texmap_coat_bump" true cm warnAmount:false) do
+				(
+					local cbp = firstProp pm #(#clearcoat_bump_map_amt, #coat_bump_map_amt)
+					if cbp != undefined do setP pm cbp ((vMult vm "texmap_coat_bump") / 100.0)
+				)
+			)
+
+			-- sheen ------------------------------------------------------
+			local shc = getP vm #sheen_color
+			local shMap = getP vm #texmap_sheen
+			local shOn = shMap != undefined and (vOn vm "texmap_sheen")
+			if shOn or ((isKindOf shc Color) and not (isBlack shc)) do
+			(
+				local w = 1.0
+				local col = white
+				if (isKindOf shc Color) and not shOn do
+				(
+					local mx = amax #(shc.r, shc.g, shc.b)
+					if mx > 0.5 do
+					(
+						w = mx / 255.0
+						col = shc * (255.0 / mx)
+					)
+				)
+				setP pm #sheen w
+				setP pm #sheen_color col
+				-- the Physical sheen roughness is always a roughness
+				setP pm #sheen_roughness (conv (num (getP vm #sheen_glossiness) undefined) useRough true)
+				pplug pm "sheen_color_map" shMap vm "texmap_sheen" false cm
+				local shrSlot = firstProp pm #(#sheen_roughness_map, #sheen_rough_map)
+				local shgMap = getP vm #texmap_sheen_glossiness
+				-- (no sheen roughness slot: the map is reported with the other leftovers)
+				if shrSlot != undefined and (pplug pm (shrSlot as string) shgMap vm "texmap_sheen_glossiness" true cm) and not useRough do
+					warn "texmap_sheen_glossiness: a glossiness map in the Physical sheen roughness slot, check it"
+			)
+
+			-- bump / normal ----------------------------------------------
+			if (pplug pm "bump_map" (getP vm #texmap_bump) vm "texmap_bump" true cm warnAmount:false) do
+				setP pm #bump_map_amt ((vMult vm "texmap_bump") / 100.0)
+
+			-- displacement -----------------------------------------------
+			if (pplug pm "displacement_map" (getP vm #texmap_displacement) vm "texmap_displacement" true cm warnAmount:false) do
+			(
+				setP pm #displacement_map_amt ((vMult vm "texmap_displacement") / 100.0)
+				warn "displacement: check the amount (V-Ray and the Physical do not use the same scale)"
+			)
+
+			-- what has no Physical counterpart here ----------------------
+			local an = num (getP vm #anisotropy) 0.0
+			if (abs an) > 0.001 do warn ("anisotropy " + (fmtVal an) + " not converted")
+			local tl = getP vm #translucency_on
+			if (isKindOf tl Number) and tl != 0 do warn "translucency (sub-surface) not converted"
+
+			-- any other map left in the VRayMtl is reported, never lost silently
+			for p in (getPropNames vm) do
+			(
+				local ps = toLower (p as string)
+				if (matchPattern ps pattern:"texmap_*") and not (matchPattern ps pattern:"*_on") and \
+					not (matchPattern ps pattern:"*_multiplier") and (findItem rvUsed ps) == 0 do
+				(
+					local v = getP vm p
+					if isMap v do warn (ps + " not transferred (no Physical counterpart handled): " + (describeMap v 0))
+				)
+			)
+			rvConverted += 1
+			pm
+		)
+
+		-- Every VRayMtl under a material (Multi/Sub-Object, blends...)
+		fn collectVRay m found visited =
+		(
+			if m != undefined and (findItem visited m) == 0 do
+			(
+				append visited m
+				if ((classOf m) as string) == "VRayMtl" then
+					appendIfUnique found m
+				else
+				(
+					local n = 0
+					try (n = getNumSubMtls m) catch (n = 0)
+					for i = 1 to n do
+					(
+						local sm = undefined
+						try (sm = getSubMtl m i) catch (sm = undefined)
+						collectVRay sm found visited
+					)
+				)
+			)
+		)
+
+		fn scanVRay =
+		(
+			local found = #()
+			local visited = #()
+			for o in selection where o.material != undefined do collectVRay o.material found visited
+			found
+		)
+
+		-- EXPORT: the material an object carries during the export. A VRayMtl
+		-- becomes a Physical; a Multi/Sub-Object holding one is copied with its
+		-- sub-materials converted; another container (VRay2SidedMtl,
+		-- VRayBlendMtl, VRayMtlWrapper...), which FBX and glTF do not know, is
+		-- replaced by its first sub-material. Nothing here enters the scene's
+		-- material tree: objects get these for the export and their own back
+		-- right after.
+		fn physFor m cm =
+		(
+			local r = m
+			if m != undefined do
+			(
+				local idx = findItem rvMatSrc m
+				if idx > 0 then
+					r = rvMatDst[idx]
+				else
+				(
+					local cn = (classOf m) as string
+					if cn == "VRayMtl" then
+					(
+						logLine ""
+						logLine ("\"" + m.name + "\" -> Physical Material")
+						try (r = toPhysical m cm)
+						catch
+						(
+							warn ("conversion failed, exported as it is: " + (getCurrentException()))
+							r = m
+						)
+					)
+					else if classOf m == Multimaterial then
+					(
+						local n = 0
+						try (n = m.numsubs) catch (n = 0)
+						local subs = for i = 1 to n collect (physFor m.materialList[i] cm)
+						local changed = false
+						for i = 1 to n do if subs[i] != m.materialList[i] do changed = true
+						if changed do
+						(
+							local mm = Multimaterial numsubs:n name:m.name
+							for i = 1 to n do
+							(
+								try (mm.materialIDList[i] = m.materialIDList[i]) catch ()
+								try (mm.names[i] = m.names[i]) catch ()
+								try (mm.mapEnabled[i] = m.mapEnabled[i]) catch ()
+								mm.materialList[i] = subs[i]
+							)
+							r = mm
+						)
+					)
+					else
+					(
+						local n = 0
+						try (n = getNumSubMtls m) catch (n = 0)
+						local sub = undefined
+						if n > 0 do try (sub = getSubMtl m 1) catch (sub = undefined)
+						if sub != undefined then
+						(
+							r = physFor sub cm
+							warn (cn + " \"" + m.name + "\": FBX / glTF do not know it, its first sub-material \"" + sub.name + "\" is exported in its place")
+						)
+						else if matchPattern cn pattern:"VRay*" do
+							warn (cn + " \"" + m.name + "\": no Physical counterpart, exported as it is (Blender will not read it)")
+					)
+					append rvMatSrc m
+					append rvMatDst r
+				)
+			)
+			r
+		)
+
+		fn fileStamp f = (if doesFileExist f then (getFileModDate f) else "")
+
+		fn findExporter pat =
+		(
+			local cls = undefined
+			for c in exporterPlugin.classes while cls == undefined do
+				if matchPattern (c as string) pattern:pat do cls = c
+			cls
+		)
+
+		fn exportFbx f =
+		(
+			local before = fileStamp f
+			local cls = findExporter "FBXEXP"
+			-- the FBX plug-in is loaded on first use: its parameter functions exist after
+			if cls != undefined do try (pluginManager.loadClass cls) catch ()
+			local oldEmbed = undefined
+			try (oldEmbed = FBXExporterGetParam "EmbedTextures") catch (oldEmbed = undefined)
+			try (FBXExporterSetParam "EmbedTextures" chkEmbed.checked)
+			catch (warn "FBX: Embed Media could not be set, the exporter's own setting is used")
+			local res = false
+			try
+			(
+				if cls != undefined then res = exportFile f #noPrompt selectedOnly:true using:cls
+				else res = exportFile f #noPrompt selectedOnly:true
+			)
+			catch (warn ("FBX export failed: " + (getCurrentException())))
+			if oldEmbed != undefined do try (FBXExporterSetParam "EmbedTextures" oldEmbed) catch ()
+			local ok = (doesFileExist f) and (res == true or (fileStamp f) != before)
+			if ok then logLine ("    written: " + f + (if chkEmbed.checked then "  (textures embedded)" else ""))
+			else warn ("FBX not written: " + f)
+			ok
+		)
+
+		fn exportGlb f =
+		(
+			local ok = false
+			local cls = findExporter "*gltf*"
+			if cls == undefined then
+				warn "no glTF exporter in this 3ds Max (built in since 3ds Max 2023): .glb not written"
+			else
+			(
+				local before = fileStamp f
+				local res = false
+				try (res = exportFile f #noPrompt selectedOnly:true using:cls)
+				catch (warn ("glTF export failed: " + (getCurrentException())))
+				ok = (doesFileExist f) and (res == true or (fileStamp f) != before)
+				if ok then logLine ("    written: " + f + "  (" + (cls as string) + ")")
+				else warn ("glTF not written: " + f)
+			)
+			ok
+		)
+
+		-- Where to write: one dialog, the .fbx and the .glb share the name
+		fn exportPaths =
+		(
+			local base = "export"
+			if selection.count == 1 then base = selection[1].name
+			else if maxFileName != "" do base = getFilenameFile maxFileName
+			for c in #(":", "*", "?", "\"", "<", ">", "|", "/", "\\") do base = substituteString base c "_"
+			local dir = if maxFilePath != "" then maxFilePath else ((getDir #export) + "\\")
+			local useFbx = chkFbx.checked
+			local f = getSaveFileName caption:"aioli-phys2vray - export for Blender" \
+				filename:(dir + base + (if useFbx then ".fbx" else ".glb")) \
+				types:(if useFbx then "FBX (*.fbx)|*.fbx" else "glTF binary (*.glb)|*.glb")
+			local r = undefined
+			if f != undefined do
+			(
+				local stem = (getFilenamePath f) + (getFilenameFile f)
+				r = #((if chkFbx.checked then stem + ".fbx" else undefined), (if chkGlb.checked then stem + ".glb" else undefined))
+			)
+			r
+		)
+
+		-- EXPORT: temporary materials on the selected objects, the files, then
+		-- every object gets its own material back, whatever happened before
+		fn reverseExport cm paths =
+		(
+			local written = #()
+			local prepared = true
+			try
+			(
+				for o in (selection as array) do
+				(
+					local m = undefined
+					try (m = o.material) catch (m = undefined)
+					if m != undefined do
+					(
+						local nm = physFor m cm
+						if nm != m do
+						(
+							try
+							(
+								o.material = nm
+								append rvObjs o
+								append rvObjMats m
+							)
+							catch (warn ("\"" + o.name + "\": export material not assigned: " + (getCurrentException())))
+						)
+					)
+				)
+			)
+			catch
+			(
+				prepared = false
+				warn ("export not written, preparation failed: " + (getCurrentException()))
+			)
+			if prepared do
+			(
+				logLine ""
+				logLine "Export"
+				try
+				(
+					if paths[1] != undefined and (exportFbx paths[1]) do append written paths[1]
+					if paths[2] != undefined and (exportGlb paths[2]) do append written paths[2]
+				)
+				catch (warn ("export interrupted: " + (getCurrentException())))
+			)
+			-- the scene as it was
+			local back = 0
+			for i = 1 to rvObjs.count do
+			(
+				try (rvObjs[i].material = rvObjMats[i]; back += 1)
+				catch (warn ("\"" + rvObjs[i].name + "\": its material could not be put back: " + (getCurrentException())))
+			)
+			if rvObjs.count > 0 do logLine ("    " + (back as string) + " object(s) given their own material back")
+			-- the throw-away materials and maps let go of the scene's maps and
+			-- materials, so they never count as users later (Slate clean-up)
+			for t in (rvMatDst + rvBuilt) where t != undefined and (findItem rvMatSrc t) == 0 do
+			(
+				local k = 0
+				try (k = getNumSubTexmaps t) catch (k = 0)
+				for i = 1 to k do try (setSubTexmap t i undefined) catch ()
+				try (k = getNumSubMtls t) catch (k = 0)
+				for i = 1 to k do try (setSubMtl t i undefined) catch ()
+			)
+			written
+		)
+
+		-- CONVERT IN SCENE: the VRayMtls replaced wherever they are used, like the
+		-- Physical -> V-Ray way, and the V-Ray maps' cut-off nodes taken out of
+		-- the Slate views
+		fn reverseConvert found cm =
+		(
+			local olds = #()
+			local news = #()
+			local swapped = #()
+			for vm in found do
+			(
+				logLine ""
+				logLine ("\"" + vm.name + "\" -> Physical Material")
+				local pm = undefined
+				try (pm = toPhysical vm cm)
+				catch
+				(
+					warn ("conversion failed, material skipped: " + (getCurrentException()))
+					pm = undefined
+				)
+				if pm != undefined do
+				(
+					append olds vm
+					append news pm
+				)
+			)
+			for i = 1 to olds.count do
+			(
+				local ok = true
+				try (replaceInstances olds[i] news[i])
+				catch
+				(
+					ok = false
+					warn ("\"" + olds[i].name + "\" could not be replaced: " + (getCurrentException()))
+				)
+				if ok do append swapped olds[i]
+			)
+			cleanViews (makeUniqueArray rvMapSrc) swapped
+			for pm in news where (getP pm #base_color_map) != undefined do try (showTextureMap pm true) catch ()
+			swapped.count
+		)
+
+		fn rvReset =
+		(
+			rvMapSrc = #()
+			rvMapData = #()
+			rvMapDst = #()
+			rvBuilt = #()
+			rvMatSrc = #()
+			rvMatDst = #()
+			rvObjs = #()
+			rvObjMats = #()
+			rvUsed = #()
+			rvRndWarned = false
+			rvConverted = 0
+		)
+
+		----------------------------------------------------------------
 		-- MAIN PROCESS
 		----------------------------------------------------------------
 		fn refreshStatus =
 		(
 			local phys = scanSelection()
-			lblSel.text = (selection.count as string) + " object(s) selected - " + (phys.count as string) + " Physical material(s)"
+			local vr = scanVRay()
+			lblSel.text = (selection.count as string) + " object(s) selected - " + (phys.count as string) + " Physical, " + (vr.count as string) + " VRayMtl"
 			btnGo.enabled = (phys.count > 0)
 			btnReport.enabled = (phys.count > 0)
+			btnExport.enabled = (selection.count > 0)
+			btnToPhys.enabled = (vr.count > 0)
 		)
 
 		fn runTool dryRun =
@@ -1513,6 +2355,80 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 			refreshStatus()
 		)
 
+		-- V-Ray -> Physical. doExport: for the export only, the scene is left as
+		-- it was; otherwise in the scene, in a single undo.
+		fn runReverse doExport =
+		(
+			warnCount = 0
+			rvReset()
+			if doExport and not (chkFbx.checked or chkGlb.checked) then
+				messageBox "Tick FBX and/or glTF (.glb)." title:"aioli-phys2vray"
+			else if selection.count == 0 then
+				lblStatus.text = "Nothing selected."
+			else
+			(
+				local found = scanVRay()
+				local proceed = true
+				local paths = undefined
+				if not doExport do
+				(
+					if found.count == 0 do
+					(
+						proceed = false
+						lblStatus.text = "No VRayMtl on the selection."
+					)
+					local others = if proceed then (countOtherUsers found) else 0
+					-- a material is replaced wherever it is used: say so first
+					if proceed and others > 0 do
+						proceed = queryBox ((others as string) + " object(s) outside the selection use these materials too.\n" + \
+							"They will get the Physical Material as well: a material is replaced wherever it is used.\n\nContinue?") \
+							title:"aioli-phys2vray"
+				)
+				if proceed and doExport do
+				(
+					paths = exportPaths()
+					if paths == undefined do proceed = false
+				)
+				if proceed do
+				(
+					local cm = detectColorMgmt()
+					local n = 0
+					local written = #()
+					-- EXPORT leaves the scene as it was: it must not ask to be saved
+					local dirty = true
+					try (dirty = getSaveRequired()) catch (dirty = true)
+					logLine ""
+					logLine ("[aioli-phys2vray] " + (if doExport then "EXPORT FOR BLENDER" else "V-RAY -> PHYSICAL") + " - " + \
+						(found.count as string) + " VRayMtl on " + (selection.count as string) + " selected object(s)")
+					disableSceneRedraw()
+					try
+					(
+						with animate off
+						(
+							if doExport then
+								undo off (written = reverseExport cm paths)
+							else
+								undo "aioli-phys2vray V-Ray to Physical" on (n = reverseConvert found cm)
+						)
+					)
+					catch
+					(
+						warn ("unexpected error: " + (getCurrentException()))
+					)
+					enableSceneRedraw()
+					completeRedraw()
+					if doExport and not dirty do try (setSaveRequired false) catch ()
+					local msg = if doExport then
+						((rvConverted as string) + " VRayMtl converted for the export, " + (written.count as string) + " file(s) written, " + (warnCount as string) + " warning(s).")
+					else
+						((n as string) + " VRayMtl replaced by Physical, " + (warnCount as string) + " warning(s). Ctrl+Z to go back.")
+					logLine ("[aioli-phys2vray] " + msg)
+					lblStatus.text = msg + "\nDetails in the MAXScript Listener (F11)."
+				)
+			)
+			refreshStatus()
+		)
+
 		----------------------------------------------------------------
 		-- SETTINGS PERSISTENCE
 		----------------------------------------------------------------
@@ -1529,6 +2445,10 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 				setINISetting iniFile "Settings" "UVWRandomizer" (chkRandomizer.checked as string)
 				setINISetting iniFile "Settings" "AlphaOpacity" (chkAlphaOpacity.checked as string)
 				setINISetting iniFile "Settings" "Linear" (chkLinear.checked as string)
+				setINISetting iniFile "Settings" "ExportFbx" (chkFbx.checked as string)
+				setINISetting iniFile "Settings" "ExportGlb" (chkGlb.checked as string)
+				setINISetting iniFile "Settings" "EmbedTextures" (chkEmbed.checked as string)
+				setINISetting iniFile "Settings" "UnwrapMaps" (chkUnwrap.checked as string)
 			)
 			catch()
 		)
@@ -1551,6 +2471,10 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 					v = getINISetting iniFile "Settings" "UVWRandomizer"; if v != "" do chkRandomizer.checked = (v == "true")
 					v = getINISetting iniFile "Settings" "AlphaOpacity"; if v != "" do chkAlphaOpacity.checked = (v == "true")
 					v = getINISetting iniFile "Settings" "Linear"; if v != "" do chkLinear.checked = (v == "true")
+					v = getINISetting iniFile "Settings" "ExportFbx"; if v != "" do chkFbx.checked = (v == "true")
+					v = getINISetting iniFile "Settings" "ExportGlb"; if v != "" do chkGlb.checked = (v == "true")
+					v = getINISetting iniFile "Settings" "EmbedTextures"; if v != "" do chkEmbed.checked = (v == "true")
+					v = getINISetting iniFile "Settings" "UnwrapMaps"; if v != "" do chkUnwrap.checked = (v == "true")
 				)
 			)
 			catch()
@@ -1560,6 +2484,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 		-- HANDLERS
 		----------------------------------------------------------------
 		on chkVRayBitmap changed st do chkRandomizer.enabled = st
+		on chkFbx changed st do chkEmbed.enabled = st
 
 		on btnReport pressed do
 		(
@@ -1573,10 +2498,23 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 			runTool false
 		)
 
+		on btnExport pressed do
+		(
+			saveSettings()
+			runReverse true
+		)
+
+		on btnToPhys pressed do
+		(
+			saveSettings()
+			runReverse false
+		)
+
 		on aioli_roPhys2Vray open do
 		(
 			loadSettings()
 			chkRandomizer.enabled = chkVRayBitmap.checked
+			chkEmbed.enabled = chkFbx.checked
 			refreshStatus()
 			local cb = "try (aioli_roPhys2Vray.refreshStatus()) catch ()"
 			callbacks.addScript #selectionSetChanged cb id:#aioli_phys2vray
@@ -1632,7 +2570,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 
 	local src = ""
 	src += "macroScript aioli_phys2vray category:\"aiolicollective\" buttonText:\"phys2vray\" "
-	src += "toolTip:\"aioli-phys2vray - Physical Material to VRayMtl, maps plugged back\"\n"
+	src += "toolTip:\"aioli-phys2vray - Physical Material <-> VRayMtl, maps plugged back\"\n"
 	src += "(\n"
 	src += "    on execute do\n"
 	src += "    (\n"

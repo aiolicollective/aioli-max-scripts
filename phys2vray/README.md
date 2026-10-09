@@ -11,10 +11,15 @@ Replace the native **Physical Materials** on the selected objects with
 each material has its own. Made for FBX files exported from Blender, works on
 any Physical Material.
 
+And the other way round, since 1.4: the **VRayMtl** of the selection become
+**Physical Materials** for an **FBX** and / or **glTF** export that opens in
+Blender with its textures — without touching the scene, or in the scene if you
+want to export it yourself. See [V-Ray → Physical](#v-ray--physical-exports-to-blender).
+
 - **File:** `aioli-phys2vray.ms` — single file, no dependency
 - **Compatibility:** 3ds Max 2017+ (Physical Material), V-Ray 5+ (metalness,
   roughness mode, coat, sheen). Written for 3ds Max 2026 / V-Ray 7.
-- **Version:** 1.3 — **in test**, see [`NOTES.md`](NOTES.md) and the [changelog](#changelog)
+- **Version:** 1.4 — **in test**, see [`NOTES.md`](NOTES.md) and the [changelog](#changelog)
 
 ---
 
@@ -52,8 +57,8 @@ Settings are remembered between sessions in an `.ini` in `getDir #plugcfg`.
    them, including inside Multi/Sub-Object materials.
 2. **REPORT** — prints to the MAXScript Listener (`F11`) what each Physical holds
    (values, maps, bitmap files) and what CONVERT would do with it. Changes nothing.
-3. **CONVERT** — builds the VRayMtl, swaps it in, in a single undo. Every step is
-   logged in the Listener, with a `!` in front of anything that needs a look.
+3. **CONVERT TO V-RAY** — builds the VRayMtl, swaps it in, in a single undo. Every
+   step is logged in the Listener, with a `!` in front of anything that needs a look.
 
 A material is replaced **wherever it is used**, the way the material editor
 would do it. If objects outside the selection share one of the materials, the
@@ -143,8 +148,72 @@ a Physical slot is listed by name in the Listener — nothing is dropped silentl
 
 ---
 
+## V-Ray → Physical (exports to Blender)
+
+FBX and glTF exporters know the Physical Material, Bitmaps and Normal Bumps, not
+V-Ray's classes: a VRayMtl reaches Blender without its textures. The lower part
+of the panel converts the other way.
+
+- **EXPORT SELECTION…** — asks for a file name, gives the selected objects
+  Physical Materials **for the export only**, writes the `.fbx` and / or `.glb`
+  (same name, same folder), then gives every object its own material back. The
+  scene is left as it was: nothing to undo, nothing to save.
+- **CONVERT IN SCENE** — replaces the VRayMtl of the selection with Physical
+  Materials in the scene, wherever they are used (it asks first if objects
+  outside the selection share them), in a single undo. Export yourself, Ctrl+Z
+  to go back.
+
+| VRayMtl | Physical |
+|---|---|
+| Diffuse + map (amount on a black swatch → base weight) | Base colour + map |
+| Diffuse roughness + map | Diffuse roughness + map |
+| Reflection colour / map | Reflectivity × reflection colour / map (white with a map) |
+| Reflection glossiness + map, *Use roughness* | Roughness + map: a value alone is turned into a roughness; a glossiness **map** gets *Inv* on |
+| Metalness + map | Metalness + map |
+| IOR (lock on: refraction IOR, off: reflection IOR) + map | IOR + map |
+| Refraction colour / map, fog colour and depth | Transparency, transparency colour / map, depth |
+| Refraction glossiness + map | Transparency roughness (locked when it matches the reflection) |
+| Opacity map | Cutout map |
+| Self-illumination, multiplier, map | Emission, luminance = multiplier × 477.464, map |
+| Coat, sheen + maps | Coating, sheen + maps |
+| Bump map + amount, VRayNormalMap | Bump map, amount ÷ 100, Normal Bump (flips and space kept) |
+| Displacement map + amount | Displacement map, amount ÷ 100 |
+| VRayBitmap | Bitmap: same file, UVW coordinates, output; data maps read linear |
+
+- **Bitmaps** already in the VRayMtl are reused as they are. **VRayBitmaps**
+  become Bitmaps; their UVW randomizer is not carried over (FBX, glTF and
+  Blender do not know it).
+- **Other maps** (Output, Color Correction, Triplanar…) are not carried by FBX
+  or glTF. With *Plug the texture found inside other maps* (default), a map
+  holding a single texture is replaced by that texture, and the log says what
+  is lost; otherwise it is plugged as it is and Blender will not see it.
+- **Multi/Sub-Object** materials are kept, their VRayMtl converted. Another
+  container (VRay2SidedMtl, VRayBlendMtl, VRayMtlWrapper…) is exported as its
+  first sub-material.
+- **Normal maps:** a V-Ray normal map read with the green flipped is an OpenGL
+  file, what Blender reads. One read without the flip is a DirectX file: the log
+  warns that its green will be inverted in Blender.
+- **Refraction:** Blender reads an FBX transparency as alpha (see-through), not
+  as glass. The log warns on every transparent material.
+- **Not converted, and reported:** anisotropy, translucency, map amounts below
+  100 % (the map is plugged at 100 %), and any other map left in a VRayMtl slot.
+
+| Control | Effect |
+|---|---|
+| FBX / glTF binary (.glb) | Which files EXPORT writes. glTF needs 3ds Max 2023+; Blender rebuilds a full Principled BSDF from it (roughness, metalness, normal, alpha), more faithfully than from an FBX. |
+| Embed textures in the FBX | Embed Media: the `.fbx` carries its textures and Blender unpacks them. The FBX exporter's own setting is put back afterwards. The other FBX settings are the exporter's current ones. |
+| Plug the texture found inside other maps | See above. |
+
+---
+
 ## Changelog
 
+- **1.4** — The other way round: VRayMtl → Physical Material, for an FBX and / or
+  glTF export that Blender opens with its textures. EXPORT SELECTION… does it
+  for the export only and leaves the scene as it was; CONVERT IN SCENE does it
+  in the scene, in one undo. VRayBitmap → Bitmap, VRayNormalMap → Normal Bump,
+  wrapper maps replaced by their single texture (option). The forward CONVERT
+  button is now *CONVERT TO V-RAY*.
 - **1.3** — One VRayUVWRandomizer **per material**, shared by that material's
   VRayBitmaps (1.1 and 1.2 had one for the whole scene). VRayBitmaps and
   VRayNormalMaps are now built per material and plugged straight into the new

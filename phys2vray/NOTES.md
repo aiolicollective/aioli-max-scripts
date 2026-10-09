@@ -43,6 +43,11 @@ Listener.** That output is the ground truth the open questions below need.
 | 14 | VRayUVWRandomizer defaults, and does `mapSource` bypass the VRayBitmap's own tiling? | The randomizer's properties are printed when it is created. A bitmap with non-default tiling gets a warning. | `materialRandomizer` |
 | 15 | ~~After a `replaceInstances` on a map, one node per map in the Slate view, or twice?~~ Twice (test of 1.2). Hence 1.3: maps are no longer swapped in place. | — | — |
 | 16 | Does `DeleteSelection` in a Slate view only remove nodes, or can it also cut a reference in a material? | Only maps whose every owner is an old Physical of the run are removed, so a material in use is never wired to them. Undo of the Slate clean-up not verified. | `cleanViews` |
+| 17 | What does the 3ds Max FBX exporter write for a Physical Material, and what does Blender's FBX importer read back? Base colour, Normal Bump, roughness (and the *Inv* flag), metalness, cutout? | The whole reverse way rests on it. Expected: base colour and normal pass, roughness / metalness unsure. First test: export one asset, import it in Blender, look at the Principled BSDF. | `toPhysical`, `exportFbx` |
+| 18 | Class name of the glTF exporter (`exporterPlugin.classes`, matched on `*gltf*`), and does `#noPrompt` take its default settings? Does it pack roughness and metalness into one texture, and honour *Inv*? | The log prints the class used. No exporter found → warning, no `.glb`. | `exportGlb` |
+| 19 | `FBXExporterGetParam "EmbedTextures"` exists? | If not, Embed Media is set but not put back: the exporter keeps it on afterwards. | `exportFbx` |
+| 20 | VRayNormalMap `normal_map_type` (name and numbering, 0 tangent … 3 world, same as Normal Bump `method`?) | A non-tangent map is warned and its space copied as is. | `exportMap` |
+| 21 | `getSaveRequired` / `setSaveRequired`: does an EXPORT leave the scene unmodified for 3ds Max? | Cosmetic: Max would ask to save a scene that did not change. | `runReverse` |
 
 ---
 
@@ -173,6 +178,39 @@ the function in memory (with a message) when the file is gone.
 `replaceInstances`, which showed the VRayNormalMap twice instead. 1.3 removes
 the old node from the views (see *Maps are plugged, never swapped in place*).
 
+### V-Ray → Physical: the export never touches the scene (1.4)
+
+Asked for by victor.oli: export an asset to Blender with its textures, the scene
+staying in V-Ray. EXPORT does not swap materials in the scene: it assigns
+throw-away materials to the selected **objects** (`o.material = …`), exports,
+and gives every object its own material back — the material tree, the
+Material Editor and the Slate views are never touched, and it runs under
+`undo off`, so nothing lands in the undo stack. The restore runs whatever
+happens before it (conversion error, exporter error, export interrupted), and
+the throw-away materials then let go of the scene's maps so they never count
+as users later. A Multi/Sub-Object is copied with its VRayMtl converted; the
+original is untouched. CONVERT IN SCENE is the forward way mirrored:
+`replaceInstances`, one undo, old maps' Slate nodes removed when dead.
+
+The V-Ray maps are never modified, in both modes: Bitmaps are reused,
+VRayBitmaps get a new Bitmap, VRayNormalMaps a new Normal Bump, a Normal Bump
+holding VRayBitmaps a new Normal Bump. The cache is keyed on the map **and**
+its reading (data or colour), so a VRayBitmap used as both gives two Bitmaps.
+
+Choices made for Blender rather than for the Max render:
+- a reflection glossiness **value** is turned into a roughness (Inv off), what
+  every exporter reads; only a glossiness **map** keeps Inv on, with a warning,
+  since an exporter may drop the flag;
+- a wrapper map holding one texture (Output, Color Correction, Triplanar…) is
+  replaced by that texture by default, because FBX and glTF only carry plain
+  bitmaps — the log names what is lost;
+- a container material FBX does not know (VRay2SidedMtl, VRayBlendMtl…) is
+  exported as its first sub-material;
+- the green flip is not changed: Blender reads the file, not the flag. A map V-Ray
+  reads with the flip is an OpenGL file, fine for Blender; one read without the
+  flip is DirectX, and only a warning can help (fixing it means rewriting the
+  image).
+
 ### No `return` inside `try`
 
 MaxScript implements `return` with an exception, which a surrounding `try` can
@@ -192,3 +230,6 @@ Self-illumination multiplier = emission weight × luminance (cd/m²) / 477.464.
 - Glossiness ↔ roughness map inversion through an Output map, instead of a
   warning, if the import turns out to need it often.
 - An option to assign on the selection only, duplicating shared materials.
+- Reverse way: Corona materials (CoronaPhysicalMtl, CoronaBitmap) — asked for
+  later, VRayMtl only for now. Flipping the green of DirectX normal maps by
+  writing a new image for the export. A REPORT for the reverse way.
