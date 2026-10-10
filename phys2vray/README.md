@@ -19,7 +19,7 @@ want to export it yourself. See [V-Ray → Physical](#v-ray--physical-exports-to
 - **File:** `aioli-phys2vray.ms` — single file, no dependency
 - **Compatibility:** 3ds Max 2017+ (Physical Material), V-Ray 5+ (metalness,
   roughness mode, coat, sheen). Written for 3ds Max 2026 / V-Ray 7.
-- **Version:** 1.5 — **in test**, see [`NOTES.md`](NOTES.md) and the [changelog](#changelog)
+- **Version:** 1.6 — **in test**, see [`NOTES.md`](NOTES.md) and the [changelog](#changelog)
 
 ---
 
@@ -98,8 +98,10 @@ each material on its own:
   Data maps (roughness, metalness, normal, bump, opacity…) get the transfer
   function *none* and the RGB primaries *Raw* (no conversion at all, as Chaos
   recommends); colour maps (diffuse, reflection, self-illumination…) get the
-  transfer function *sRGB*, primaries left on *Default* — except floating-point
-  files (`.exr`, `.hdr`), already linear, which get *none*. The
+  transfer function *sRGB* and the RGB primaries *sRGB*, so V-Ray converts them
+  to its rendering colour space (ACEScg or sRGB) — except floating-point files
+  (`.exr`, `.hdr`), already linear: transfer function *none*, primaries left on
+  *Default*, with a warning to set them by hand in an ACEScg scene. The
   VRayBitmaps of a material share that material's VRayUVWRandomizer
   (`mapSource`); two materials never share one. A Bitmap used by two materials
   gives one VRayBitmap in each.
@@ -209,6 +211,10 @@ of the panel converts the other way.
 
 ## Changelog
 
+- **1.6** — Colour VRayBitmaps get the RGB primaries *sRGB* instead of
+  *Default*. *Default* converts nothing, so in an ACEScg rendering space an sRGB
+  texture was read as ACEScg (over-saturated colours); with *sRGB*, V-Ray
+  converts it, and nothing changes in an sRGB rendering space.
 - **1.5** — Colour VRayBitmaps (diffuse and the other colour maps) get the
   transfer function *sRGB* instead of *from 3ds Max*, asked for after a test;
   `.exr` / `.hdr` files get *none*. The log shows the transfer function of every

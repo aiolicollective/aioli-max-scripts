@@ -7,7 +7,7 @@
 	FBX -> Physical Material on import), works on any Physical Material.
 
 	Author   : /ai.oli collective
-	Version  : 1.5 (in test)
+	Version  : 1.6 (in test)
 	Compat.  : 3ds Max 2017+ (Physical Material) with V-Ray 5+ (metalness,
 	           roughness mode, coat, sheen). Written for 3ds Max 2026 / V-Ray 7.
 	Usage    : Scripting > Run Script, or drag & drop into 3ds Max. The script
@@ -117,7 +117,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 			checkbox chkAlphaOpacity "Transparency map -> Opacity (Blender alpha)" checked:true \
 				tooltip:"A map in the Physical transparency slot is read as an alpha cutout (Blender)\nand goes to the VRayMtl opacity slot instead of refraction."
 			checkbox chkLinear "Data maps in linear (gamma 1.0 / Raw)" checked:true \
-				tooltip:"Roughness, metalness, normal, bump, opacity... are data, not colour.\nVRayBitmap: transfer function none, primaries Raw (off: from 3ds Max). Bitmap kept: reloaded with gamma 1.0 (gamma mode) or Raw (OCIO).\nA bitmap also used in a colour slot is treated as colour. Colour maps always get sRGB (EXR / HDR: none)."
+				tooltip:"Roughness, metalness, normal, bump, opacity... are data, not colour.\nVRayBitmap: transfer function none, primaries Raw (off: from 3ds Max). Bitmap kept: reloaded with gamma 1.0 (gamma mode) or Raw (OCIO).\nA bitmap also used in a colour slot is treated as colour. Colour maps always get sRGB, primaries sRGB (EXR / HDR: none, Default)."
 		)
 
 		button btnReport "REPORT" width:136 height:30 across:2 \
@@ -550,11 +550,27 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 			else #(2, "sRGB")
 		)
 
+		-- RGB primaries (rgbColorSpace) of a VRayBitmap: 0 Default, 1 sRGB,
+		-- 2 ACEScg, 3 Raw. Default converts nothing (unless the file name
+		-- carries a colour space tag), so in an ACEScg rendering space an sRGB
+		-- texture left on Default is read as ACEScg: over-saturated colours.
+		-- Colour maps get sRGB (1.6): V-Ray converts them to the rendering
+		-- space, and nothing changes when that space is sRGB. Data maps get Raw
+		-- (no conversion at all, as Chaos recommends for bump, normal,
+		-- displacement and roughness). Floating-point files and data maps with
+		-- "Data maps in linear" off stay on Default (undefined: not set).
+		-- Returns #(code, label).
+		fn primariesFor bt isData =
+		(
+			local ext = toLower (getFilenameType (bitmapFile bt))
+			local isFloat = (findItem #(".exr", ".hdr", ".pfm") ext) > 0
+			if isData and chkLinear.checked then #(3, "Raw")
+			else if isData or isFloat then #(undefined, "Default")
+			else #(1, "sRGB")
+		)
+
 		-- A VRayBitmap that reads the same file the same way as a Bitmap.
-		-- Transfer function: see transferFor. RGB primaries (rgbColorSpace):
-		-- 0 Default, 1 sRGB, 2 ACEScg, 3 Raw. They are left on
-		-- Default for colour maps; data maps get Raw (no conversion at all), as
-		-- Chaos recommends for bump, normal, displacement and roughness maps.
+		-- Transfer function: see transferFor. RGB primaries: see primariesFor.
 		fn makeVRayBitmap bt isData vm =
 		(
 			local vb = vbClass name:bt.name
@@ -602,17 +618,20 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 				csLogged = true
 				logLine ("    VRayBitmap transfer function " + (cs0 as string) + " by default; set to 0 (none) for data maps, 2 (sRGB) for colour maps: check a colour VRayBitmap shows sRGB")
 			)
-			if isData and chkLinear.checked do
+			local cp = primariesFor bt isData
+			if cp[1] != undefined then
 			(
 				local rgb0 = getP vb #rgbColorSpace
-				if not (setP vb #rgbColorSpace 3) then
-					warn ("\"" + bt.name + "\": RGB primaries not set to Raw")
+				if not (setP vb #rgbColorSpace cp[1]) then
+					warn ("\"" + bt.name + "\": RGB primaries not set to " + cp[2])
 				else if not rgbLogged do
 				(
 					rgbLogged = true
-					logLine ("    VRayBitmap RGB primaries " + (rgb0 as string) + " by default; set to 3 (Raw) for data maps: check the VRayBitmap shows Raw")
+					logLine ("    VRayBitmap RGB primaries " + (rgb0 as string) + " by default; set to 3 (Raw) for data maps, 1 (sRGB) for colour maps: check a data VRayBitmap shows Raw and a colour one sRGB")
 				)
 			)
+			else if not isData do
+				warn ("\"" + bt.name + "\": floating-point colour map, RGB primaries left on Default: if V-Ray renders in ACEScg, set them by hand (sRGB for a linear sRGB / Rec.709 file, ACEScg for an ACEScg one)")
 			-- the material's randomizer
 			if chkRandomizer.checked do
 			(
@@ -646,8 +665,8 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 				local isData = inData and not inColor
 				if inData and inColor do warn ("\"" + f + "\" is used as colour and as data: treated as colour")
 				local tf = transferFor bt isData
-				local tag = "  (" + (if isData then "data" else "colour") + ": transfer function " + tf[2] + \
-					(if isData and chkLinear.checked then ", primaries Raw" else "") + ")"
+				local cp = primariesFor bt isData
+				local tag = "  (" + (if isData then "data" else "colour") + ": transfer function " + tf[2] + ", primaries " + cp[2] + ")"
 				if isDry then
 					logLine ("    would become a VRayBitmap: " + f + tag)
 				else
