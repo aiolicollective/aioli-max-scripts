@@ -19,7 +19,7 @@ want to export it yourself. See [V-Ray → Physical](#v-ray--physical-exports-to
 - **File:** `aioli-phys2vray.ms` — single file, no dependency
 - **Compatibility:** 3ds Max 2017+ (Physical Material), V-Ray 5+ (metalness,
   roughness mode, coat, sheen). Written for 3ds Max 2026 / V-Ray 7.
-- **Version:** 1.4 — **in test**, see [`NOTES.md`](NOTES.md) and the [changelog](#changelog)
+- **Version:** 1.5 — **in test**, see [`NOTES.md`](NOTES.md) and the [changelog](#changelog)
 
 ---
 
@@ -97,8 +97,9 @@ each material on its own:
   angle, channel, blur), output settings, mono / RGB output and alpha source.
   Data maps (roughness, metalness, normal, bump, opacity…) get the transfer
   function *none* and the RGB primaries *Raw* (no conversion at all, as Chaos
-  recommends); colour maps get *from 3ds Max*, so 3ds Max's colour management
-  decides per file as it did for the Bitmap, primaries left on *Default*. The
+  recommends); colour maps (diffuse, reflection, self-illumination…) get the
+  transfer function *sRGB*, primaries left on *Default* — except floating-point
+  files (`.exr`, `.hdr`), already linear, which get *none*. The
   VRayBitmaps of a material share that material's VRayUVWRandomizer
   (`mapSource`); two materials never share one. A Bitmap used by two materials
   gives one VRayBitmap in each.
@@ -129,7 +130,7 @@ a Physical slot is listed by name in the Listener — nothing is dropped silentl
 | Bump bitmap named \*normal\* → normal map | A bare bitmap in the bump slot whose file name says normal (`normal`, `nrm`, `_nor`, `_n`) is wrapped in a VRayNormalMap instead of being read as a height map. Its bump amount is set to 100. |
 | Flip green: OpenGL normal maps (Blender) | **On by default.** V-Ray for 3ds Max reads normal maps as DirectX (Y-), Blender writes OpenGL (Y+) — confirmed by Chaos. A flip already set on a Normal Bump is kept. Untick for DirectX maps (made for 3ds Max, Unreal, Substance's DirectX preset). |
 | Transparency map → Opacity | Reads a map in the transparency slot as an alpha cutout (Blender exports its alpha there) and sends it to opacity instead of refraction. |
-| Data maps in linear | Roughness, metalness, normal, bump, opacity are data, not colour. As VRayBitmap: transfer function *none*, RGB primaries *Raw*. A data map that stays a Bitmap (option off, or inside a reused map) is reloaded with gamma 1.0 (gamma mode) or the `Raw` colour space (OCIO, 3ds Max 2024+), unless something outside the run uses it. A bitmap also used in a colour slot is treated as colour. |
+| Data maps in linear | Roughness, metalness, normal, bump, opacity are data, not colour. As VRayBitmap: transfer function *none*, RGB primaries *Raw* (off: *from 3ds Max*). A data map that stays a Bitmap (option off, or inside a reused map) is reloaded with gamma 1.0 (gamma mode) or the `Raw` colour space (OCIO, 3ds Max 2024+), unless something outside the run uses it. A bitmap also used in a colour slot is treated as colour. |
 
 ---
 
@@ -208,6 +209,10 @@ of the panel converts the other way.
 
 ## Changelog
 
+- **1.5** — Colour VRayBitmaps (diffuse and the other colour maps) get the
+  transfer function *sRGB* instead of *from 3ds Max*, asked for after a test;
+  `.exr` / `.hdr` files get *none*. The log shows the transfer function of every
+  VRayBitmap it makes.
 - **1.4** — The other way round: VRayMtl → Physical Material, for an FBX and / or
   glTF export that Blender opens with its textures. EXPORT SELECTION… does it
   for the export only and leaves the scene as it was; CONVERT IN SCENE does it

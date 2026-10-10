@@ -38,7 +38,7 @@ Listener.** That output is the ground truth the open questions below need.
 | 9 | Physical anisotropy default: 1.0 (isotropic, as V2A implies) or something else? | If the default is not 1.0, every material warns "anisotropy not converted". Noise, not damage. | end of `convertMaterial` |
 | 10 | Displacement amount: × 100 here; V2A copies it 1:1 the other way while dividing bump by 100. | One of the two is wrong. A warning asks to check. | displacement block |
 | 11 | Are `replaceInstances` and the bitmap reload undone by one Ctrl+Z? | Expected, not verified. | `runTool` |
-| 12 | VRayBitmap: default `maptype`, `color_space` and `rgbColorSpace` of a new one, and are 4 (3ds Max standard), 0 / 3 (none / from 3ds Max) and 3 (Raw) still those values in V-Ray 7? | The log prints the defaults once per run. Indices from Lecchi's scripts (`maptype == 2` is spherical, `color_space` 0 none … 3 from 3ds Max) and Vella's (`rgbColorSpace == 3` read as raw). A data VRayBitmap must show *Raw* in its RGB primaries. | `makeVRayBitmap` |
+| 12 | VRayBitmap: default `maptype`, `color_space` and `rgbColorSpace` of a new one, and are 4 (3ds Max standard), 0 / 2 / 3 (none / sRGB / from 3ds Max) and 3 (Raw) still those values in V-Ray 7? | The log prints the defaults once per run. Indices from Lecchi's scripts (`maptype == 2` is spherical, `color_space` 0 none, 1 inverse gamma, 2 sRGB, 3 from 3ds Max) and Vella's (`rgbColorSpace == 3` read as raw). A colour VRayBitmap must show *sRGB*, a data one *none* and *Raw*. | `transferFor`, `makeVRayBitmap` |
 | 13 | VRayBitmap names for `monoOutput`, `rgbOutput`, `alphaSource`, `output`, `coords` | Copied when the names match; a non-default value that cannot be set is warned (alpha cutouts read from the alpha channel depend on it). | `makeVRayBitmap` |
 | 14 | VRayUVWRandomizer defaults, and does `mapSource` bypass the VRayBitmap's own tiling? | The randomizer's properties are printed when it is created. A bitmap with non-default tiling gets a warning. | `materialRandomizer` |
 | 15 | ~~After a `replaceInstances` on a map, one node per map in the Slate view, or twice?~~ Twice (test of 1.2). Hence 1.3: maps are no longer swapped in place. | — | — |
@@ -144,10 +144,14 @@ every owner found is an old Physical of the run. A map with no owner found
 a sample slot, a modifier — keeps its node. REPORT builds throw-away materials;
 at the end of a REPORT their maps are unplugged, so they never count as users.
 
-Transfer function: *none* for data maps, *from 3ds Max* for colour maps (Max's
-colour management decides per file, as it did for the Bitmap). A new VRayBitmap
-is not trusted to have a sensible default: older VRayHDRI defaulted to inverse
-gamma 1.0, made for HDR environments. RGB primaries: *Raw* for data maps (Chaos
+Transfer function: *none* for data maps, *sRGB* for colour maps since 1.5
+(1.1 to 1.4 used *from 3ds Max*, letting Max's colour management decide per
+file; after testing, victor.oli wants *sRGB* set explicitly on the diffuse, which
+is what 8-bit and 16-bit textures are written in). Floating-point files (`.exr`,
+`.hdr`, `.pfm`) are already linear and get *none*. With *Data maps in linear*
+off, a data map gets *from 3ds Max*. A new VRayBitmap is not trusted to have a
+sensible default: older VRayHDRI defaulted to inverse gamma 1.0, made for HDR
+environments. RGB primaries: *Raw* for data maps (Chaos
 recommends transfer function none + Raw for bump, normal, displacement and
 roughness), *Default* for colour maps (no conversion unless a file name carries
 a colour space tag). Values are copied, not controllers: animated tiling or

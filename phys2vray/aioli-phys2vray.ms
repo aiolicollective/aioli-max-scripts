@@ -7,7 +7,7 @@
 	FBX -> Physical Material on import), works on any Physical Material.
 
 	Author   : /ai.oli collective
-	Version  : 1.4 (in test)
+	Version  : 1.5 (in test)
 	Compat.  : 3ds Max 2017+ (Physical Material) with V-Ray 5+ (metalness,
 	           roughness mode, coat, sheen). Written for 3ds Max 2026 / V-Ray 7.
 	Usage    : Scripting > Run Script, or drag & drop into 3ds Max. The script
@@ -117,7 +117,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 			checkbox chkAlphaOpacity "Transparency map -> Opacity (Blender alpha)" checked:true \
 				tooltip:"A map in the Physical transparency slot is read as an alpha cutout (Blender)\nand goes to the VRayMtl opacity slot instead of refraction."
 			checkbox chkLinear "Data maps in linear (gamma 1.0 / Raw)" checked:true \
-				tooltip:"Roughness, metalness, normal, bump, opacity... are data, not colour.\nVRayBitmap: transfer function none. Bitmap kept: reloaded with gamma 1.0 (gamma mode) or Raw (OCIO).\nA bitmap also used in a colour slot is treated as colour."
+				tooltip:"Roughness, metalness, normal, bump, opacity... are data, not colour.\nVRayBitmap: transfer function none, primaries Raw (off: from 3ds Max). Bitmap kept: reloaded with gamma 1.0 (gamma mode) or Raw (OCIO).\nA bitmap also used in a colour slot is treated as colour. Colour maps always get sRGB (EXR / HDR: none)."
 		)
 
 		button btnReport "REPORT" width:136 height:30 across:2 \
@@ -534,11 +534,24 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 			ok
 		)
 
+		-- Transfer function (color_space) of a VRayBitmap: 0 none, 1 inverse
+		-- gamma, 2 sRGB, 3 from 3ds Max. Data maps get none (linear). Colour
+		-- maps get sRGB, what 8-bit and 16-bit textures are written in (asked
+		-- for by victor.oli in 1.5, instead of "from 3ds Max"), except
+		-- floating-point files (EXR, HDR), already linear: none. With "Data maps
+		-- in linear" off, a data map gets "from 3ds Max". Returns #(code, label).
+		fn transferFor bt isData =
+		(
+			local ext = toLower (getFilenameType (bitmapFile bt))
+			local isFloat = (findItem #(".exr", ".hdr", ".pfm") ext) > 0
+			if isData and chkLinear.checked then #(0, "none")
+			else if isData then #(3, "from 3ds Max")
+			else if isFloat then #(0, "none, floating-point file")
+			else #(2, "sRGB")
+		)
+
 		-- A VRayBitmap that reads the same file the same way as a Bitmap.
-		-- Transfer function (color_space): 0 none, 1 inverse gamma, 2 sRGB,
-		-- 3 from 3ds Max. Data maps get none (linear); colour maps get "from
-		-- 3ds Max", so Max's colour management decides per file (8-bit sRGB,
-		-- EXR linear) as it did for the Bitmap. RGB primaries (rgbColorSpace):
+		-- Transfer function: see transferFor. RGB primaries (rgbColorSpace):
 		-- 0 Default, 1 sRGB, 2 ACEScg, 3 Raw. They are left on
 		-- Default for colour maps; data maps get Raw (no conversion at all), as
 		-- Chaos recommends for bump, normal, displacement and roughness maps.
@@ -581,13 +594,13 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 			)
 			if (getP bt #apply) == true do warn ("\"" + bt.name + "\": crop / place not transferred")
 			local cs0 = getP vb #color_space
-			local csWanted = if isData and chkLinear.checked then 0 else 3
-			if not (setP vb #color_space csWanted) then
-				warn ("\"" + bt.name + "\": transfer function not set (" + (if csWanted == 0 then "none" else "from 3ds Max") + ")")
+			local tf = transferFor bt isData
+			if not (setP vb #color_space tf[1]) then
+				warn ("\"" + bt.name + "\": transfer function not set (" + tf[2] + ")")
 			else if not csLogged do
 			(
 				csLogged = true
-				logLine ("    VRayBitmap transfer function " + (cs0 as string) + " by default; set to 0 (none) for data maps, 3 (from 3ds Max) for colour maps")
+				logLine ("    VRayBitmap transfer function " + (cs0 as string) + " by default; set to 0 (none) for data maps, 2 (sRGB) for colour maps: check a colour VRayBitmap shows sRGB")
 			)
 			if isData and chkLinear.checked do
 			(
@@ -632,7 +645,9 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 				local inColor = (findItem mColor bt) > 0
 				local isData = inData and not inColor
 				if inData and inColor do warn ("\"" + f + "\" is used as colour and as data: treated as colour")
-				local tag = if isData and chkLinear.checked then "  (data: transfer function none, primaries Raw)" else ""
+				local tf = transferFor bt isData
+				local tag = "  (" + (if isData then "data" else "colour") + ": transfer function " + tf[2] + \
+					(if isData and chkLinear.checked then ", primaries Raw" else "") + ")"
 				if isDry then
 					logLine ("    would become a VRayBitmap: " + f + tag)
 				else
