@@ -48,6 +48,10 @@ Listener.** That output is the ground truth the open questions below need.
 | 19 | `FBXExporterGetParam "EmbedTextures"` exists? | If not, Embed Media is set but not put back: the exporter keeps it on afterwards. | `exportFbx` |
 | 20 | VRayNormalMap `normal_map_type` (name and numbering, 0 tangent … 3 world, same as Normal Bump `method`?) | A non-tangent map is warned and its space copied as is. | `exportMap` |
 | 21 | `getSaveRequired` / `setSaveRequired`: does an EXPORT leave the scene unmodified for 3ds Max? | Cosmetic: Max would ask to save a scene that did not change. | `runReverse` |
+| 22 | `vrayExportVRScene … exportSelectionOnly:true`: are materials, lights and the environment limited to the selection too? | An asset must not carry the whole scene. Lights are only asked for when the selection holds some. | `exportVrscene` |
+| 23 | V-Ray for Blender, *Native Objects* import: which of VRayMtl, VRayBitmap (transfer function, primaries), VRayNormalMap, VRayUVWRandomizer come back as editable nodes, which as blackboxes? | Decides whether the `.vrscene` route replaces the FBX / glTF one for V-Ray users. | — |
+| 24 | Normal maps through a `.vrscene`: V-Ray for 3ds Max reads them as DirectX, V-Ray for Blender as OpenGL. Does the relief stay right in Blender? | A flipped relief would need the green flip changed on the way. | `exportVrscene` |
+| 25 | Scale and settings: does the import read the units from the exported render settings (3ds Max often works in cm, Blender in m)? Does it also apply those settings to the Blender scene? | `exportSettings:true` is there for the units; if it overwrites the Blender scene's settings, turn it off and give the scale another way. | `exportVrscene` |
 
 ---
 
@@ -222,6 +226,22 @@ Choices made for Blender rather than for the Max render:
   reads with the flip is an OpenGL file, fine for Blender; one read without the
   flip is DirectX, and only a warning can help (fixing it means rewriting the
   image).
+
+### .vrscene for V-Ray for Blender (1.7)
+
+Asked for by victor.oli once V-Ray was installed in Blender: hand the assets
+over with their V-Ray materials. V-Ray for Blender imports a `.vrscene` as
+Blender objects with editable V-Ray materials (*Native Objects*, Chaos docs),
+so nothing is converted: the file is V-Ray's own export
+(`vrayExportVRScene`, documented on Chaos' MAXScript page), written after every
+object got its own material back — and not at all if one did not. Options set:
+`exportSelectionOnly:true`; `exportView:false` (an asset, not a shot);
+`exportLights` only when lights are selected; `exportSettings:true`, because
+the scene units travel with the render settings; `stripPaths:false`, the
+collective's machines see the same drive. Chaos: the exporter takes its
+settings from V-Ray GPU, which must be the production renderer — warned
+otherwise, not changed. Off by default until the import is tested
+(questions 22 to 25).
 
 ### No `return` inside `try`
 
