@@ -7,7 +7,7 @@
 	FBX -> Physical Material on import), works on any Physical Material.
 
 	Author   : /ai.oli collective
-	Version  : 1.6 (in test)
+	Version  : 1.7 (in test)
 	Compat.  : 3ds Max 2017+ (Physical Material) with V-Ray 5+ (metalness,
 	           roughness mode, coat, sheen). Written for 3ds Max 2026 / V-Ray 7.
 	Usage    : Scripting > Run Script, or drag & drop into 3ds Max. The script
@@ -28,6 +28,10 @@
 	an FBX or glTF export opens in Blender with its textures. EXPORT does it
 	for the export only and leaves the scene as it was; CONVERT IN SCENE does
 	it in the scene, in a single undo.
+
+	For V-Ray for Blender (1.7): EXPORT can also write a .vrscene of the
+	selection, its V-Ray materials as they are, nothing converted. In Blender:
+	File > Import > V-Ray Scene (.vrscene), Native Objects.
 -----------------------------------------------------------------------------*/
 
 global aioli_roPhys2Vray      -- the tool window
@@ -132,13 +136,15 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 				tooltip:"Writes an .fbx of the selection."
 			checkbox chkGlb "glTF binary (.glb)" checked:true \
 				tooltip:"Writes a .glb of the selection next to the .fbx (3ds Max 2023+ glTF exporter).\nBlender rebuilds roughness, metalness, normal and alpha from a glTF more faithfully than from an FBX."
+			checkbox chkVrscene ".vrscene (V-Ray for Blender)" checked:false \
+				tooltip:"Writes a .vrscene of the selection with its V-Ray materials as they are: nothing is converted.\nIn Blender with V-Ray: File > Import > V-Ray Scene (.vrscene), Native Objects.\nTexture paths are written as they are: Blender must see the same files."
 			checkbox chkEmbed "Embed textures in the FBX" checked:true \
 				tooltip:"Embed Media: the .fbx carries its textures, Blender unpacks them on import.\nThe FBX exporter's own setting is put back after the export."
 			checkbox chkUnwrap "Plug the texture found inside other maps" checked:true \
 				tooltip:"FBX and glTF only carry plain bitmaps: an Output, Color Correction, Triplanar... is lost on the way.\nOn: a map holding a single texture is replaced by that texture (what the map did is lost, the log says so).\nOff: the map is plugged as it is, and Blender will not see its texture."
 		)
 		button btnExport "EXPORT SELECTION..." width:136 height:30 across:2 \
-			tooltip:"Gives the selection Physical Materials for the export only, writes the FBX / .glb,\nthen puts the VRayMtl back. The scene is left as it was, nothing goes to the undo stack."
+			tooltip:"Gives the selection Physical Materials for the export only, writes the FBX / .glb,\nthen puts the VRayMtl back. The .vrscene keeps the VRayMtl as they are.\nThe scene is left as it was, nothing goes to the undo stack."
 		button btnToPhys "CONVERT IN SCENE" width:136 height:30 \
 			tooltip:"Replaces the VRayMtl of the selection with Physical Materials in the scene,\nin a single undo (Ctrl+Z to go back). Export it yourself afterwards."
 
@@ -2149,7 +2155,50 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 			ok
 		)
 
-		-- Where to write: one dialog, the .fbx and the .glb share the name
+		-- .vrscene (1.7): the selection with its materials as V-Ray renders them,
+		-- nothing converted, for V-Ray for Blender (File > Import > V-Ray Scene,
+		-- Native Objects). The view is left out; lights only when the selection
+		-- holds some. The render settings go along: the scene units travel with them.
+		fn exportVrscene f =
+		(
+			local ok = false
+			local fnExp = undefined
+			try (fnExp = vrayExportVRScene) catch (fnExp = undefined)
+			if fnExp == undefined then
+				warn "vrayExportVRScene not found (V-Ray not loaded?): .vrscene not written"
+			else
+			(
+				local rn = ""
+				try (rn = (classOf renderers.current) as string) catch (rn = "")
+				-- Chaos docs: the exporter takes its settings (displacement, proxies...) from V-Ray GPU
+				if not ((matchPattern rn pattern:"*GPU*") or (matchPattern rn pattern:"*V_Ray_RT*")) do
+					warn ("renderer \"" + rn + "\": V-Ray takes the .vrscene export settings (displacement, proxies) from V-Ray GPU, defaults are used")
+				local withLights = false
+				for o in selection where (superClassOf o) == light do withLights = true
+				local before = fileStamp f
+				try
+				(
+					fnExp f exportSelectionOnly:true exportView:false exportSettings:true \
+						exportLights:withLights exportGeometry:true exportNodes:true \
+						exportMaterials:true exportTextures:true exportBitmaps:true \
+						separateFiles:false stripPaths:false
+				)
+				catch (warn (".vrscene export failed: " + (getCurrentException())))
+				ok = (doesFileExist f) and ((fileStamp f) != before)
+				if ok then
+				(
+					local u = "?"
+					try (u = (units.SystemScale as string) + " " + (units.SystemType as string)) catch (u = "?")
+					logLine ("    written: " + f + "  (V-Ray materials as they are" + (if withLights then ", selected lights included" else ", no light") + ")")
+					logLine ("    3ds Max system unit: " + u + " - texture paths written as they are")
+					logLine "    in Blender: File > Import > V-Ray Scene (.vrscene), Native Objects"
+				)
+				else warn (".vrscene not written: " + f)
+			)
+			ok
+		)
+
+		-- Where to write: one dialog, the .fbx, .glb and .vrscene share the name
 		fn exportPaths =
 		(
 			local base = "export"
@@ -2157,26 +2206,40 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 			else if maxFileName != "" do base = getFilenameFile maxFileName
 			for c in #(":", "*", "?", "\"", "<", ">", "|", "/", "\\") do base = substituteString base c "_"
 			local dir = if maxFilePath != "" then maxFilePath else ((getDir #export) + "\\")
-			local useFbx = chkFbx.checked
+			local ext = ".vrscene"
+			local types = "V-Ray scene (*.vrscene)|*.vrscene"
+			if chkGlb.checked do
+			(
+				ext = ".glb"
+				types = "glTF binary (*.glb)|*.glb"
+			)
+			if chkFbx.checked do
+			(
+				ext = ".fbx"
+				types = "FBX (*.fbx)|*.fbx"
+			)
 			local f = getSaveFileName caption:"aioli-phys2vray - export for Blender" \
-				filename:(dir + base + (if useFbx then ".fbx" else ".glb")) \
-				types:(if useFbx then "FBX (*.fbx)|*.fbx" else "glTF binary (*.glb)|*.glb")
+				filename:(dir + base + ext) types:types
 			local r = undefined
 			if f != undefined do
 			(
 				local stem = (getFilenamePath f) + (getFilenameFile f)
-				r = #((if chkFbx.checked then stem + ".fbx" else undefined), (if chkGlb.checked then stem + ".glb" else undefined))
+				r = #((if chkFbx.checked then stem + ".fbx" else undefined), \
+					(if chkGlb.checked then stem + ".glb" else undefined), \
+					(if chkVrscene.checked then stem + ".vrscene" else undefined))
 			)
 			r
 		)
 
 		-- EXPORT: temporary materials on the selected objects, the files, then
-		-- every object gets its own material back, whatever happened before
+		-- every object gets its own material back, whatever happened before.
+		-- The .vrscene is written last, with the objects' own materials.
 		fn reverseExport cm paths =
 		(
 			local written = #()
-			local prepared = true
-			try
+			local needPhys = (paths[1] != undefined) or (paths[2] != undefined)
+			local prepared = needPhys
+			if needPhys do try
 			(
 				for o in (selection as array) do
 				(
@@ -2222,6 +2285,19 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 				catch (warn ("\"" + rvObjs[i].name + "\": its material could not be put back: " + (getCurrentException())))
 			)
 			if rvObjs.count > 0 do logLine ("    " + (back as string) + " object(s) given their own material back")
+			-- .vrscene: only once every object has its own material back
+			if paths[3] != undefined do
+			(
+				if back < rvObjs.count then
+					warn ".vrscene not written: some objects did not get their own material back"
+				else
+				(
+					logLine ""
+					logLine "Export .vrscene"
+					try (if (exportVrscene paths[3]) do append written paths[3])
+					catch (warn ("export interrupted: " + (getCurrentException())))
+				)
+			)
 			-- the throw-away materials and maps let go of the scene's maps and
 			-- materials, so they never count as users later (Slate clean-up)
 			for t in (rvMatDst + rvBuilt) where t != undefined and (findItem rvMatSrc t) == 0 do
@@ -2395,8 +2471,8 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 		(
 			warnCount = 0
 			rvReset()
-			if doExport and not (chkFbx.checked or chkGlb.checked) then
-				messageBox "Tick FBX and/or glTF (.glb)." title:"aioli-phys2vray"
+			if doExport and not (chkFbx.checked or chkGlb.checked or chkVrscene.checked) then
+				messageBox "Tick FBX, glTF (.glb) and/or .vrscene." title:"aioli-phys2vray"
 			else if selection.count == 0 then
 				lblStatus.text = "Nothing selected."
 			else
@@ -2453,7 +2529,8 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 					completeRedraw()
 					if doExport and not dirty do try (setSaveRequired false) catch ()
 					local msg = if doExport then
-						((rvConverted as string) + " VRayMtl converted for the export, " + (written.count as string) + " file(s) written, " + (warnCount as string) + " warning(s).")
+						((if paths[1] != undefined or paths[2] != undefined then ((rvConverted as string) + " VRayMtl converted for the export, ") else "") + \
+						(written.count as string) + " file(s) written, " + (warnCount as string) + " warning(s).")
 					else
 						((n as string) + " VRayMtl replaced by Physical, " + (warnCount as string) + " warning(s). Ctrl+Z to go back.")
 					logLine ("[aioli-phys2vray] " + msg)
@@ -2481,6 +2558,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 				setINISetting iniFile "Settings" "Linear" (chkLinear.checked as string)
 				setINISetting iniFile "Settings" "ExportFbx" (chkFbx.checked as string)
 				setINISetting iniFile "Settings" "ExportGlb" (chkGlb.checked as string)
+				setINISetting iniFile "Settings" "ExportVrscene" (chkVrscene.checked as string)
 				setINISetting iniFile "Settings" "EmbedTextures" (chkEmbed.checked as string)
 				setINISetting iniFile "Settings" "UnwrapMaps" (chkUnwrap.checked as string)
 			)
@@ -2507,6 +2585,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 					v = getINISetting iniFile "Settings" "Linear"; if v != "" do chkLinear.checked = (v == "true")
 					v = getINISetting iniFile "Settings" "ExportFbx"; if v != "" do chkFbx.checked = (v == "true")
 					v = getINISetting iniFile "Settings" "ExportGlb"; if v != "" do chkGlb.checked = (v == "true")
+					v = getINISetting iniFile "Settings" "ExportVrscene"; if v != "" do chkVrscene.checked = (v == "true")
 					v = getINISetting iniFile "Settings" "EmbedTextures"; if v != "" do chkEmbed.checked = (v == "true")
 					v = getINISetting iniFile "Settings" "UnwrapMaps"; if v != "" do chkUnwrap.checked = (v == "true")
 				)
