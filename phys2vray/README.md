@@ -15,11 +15,13 @@ And the other way round, since 1.4: the **VRayMtl** of the selection become
 **Physical Materials** for an **FBX** and / or **glTF** export that opens in
 Blender with its textures — without touching the scene, or in the scene if you
 want to export it yourself. See [V-Ray → Physical](#v-ray--physical-exports-to-blender).
+Since 1.7 the export can also write a **.vrscene** that keeps the VRayMtl as
+they are, for **V-Ray for Blender**.
 
 - **File:** `aioli-phys2vray.ms` — single file, no dependency
 - **Compatibility:** 3ds Max 2017+ (Physical Material), V-Ray 5+ (metalness,
   roughness mode, coat, sheen). Written for 3ds Max 2026 / V-Ray 7.
-- **Version:** 1.6 — **in test**, see [`NOTES.md`](NOTES.md) and the [changelog](#changelog)
+- **Version:** 1.7 — **in test**, see [`NOTES.md`](NOTES.md) and the [changelog](#changelog)
 
 ---
 
@@ -206,11 +208,39 @@ of the panel converts the other way.
 | FBX / glTF binary (.glb) | Which files EXPORT writes. glTF needs 3ds Max 2023+; Blender rebuilds a full Principled BSDF from it (roughness, metalness, normal, alpha), more faithfully than from an FBX. |
 | Embed textures in the FBX | Embed Media: the `.fbx` carries its textures and Blender unpacks them. The FBX exporter's own setting is put back afterwards. The other FBX settings are the exporter's current ones. |
 | Plug the texture found inside other maps | See above. |
+| .vrscene (V-Ray for Blender) | Also writes a `.vrscene` of the selection, see below. Off by default. |
+
+### .vrscene for V-Ray for Blender (1.7)
+
+With V-Ray installed in Blender, the materials do not need converting: V-Ray
+for Blender imports a `.vrscene` exported from 3ds Max as Blender objects with
+editable V-Ray materials (*File > Import > V-Ray Scene (.vrscene)*, mode
+*Native Objects*; what it cannot rebuild comes in as a "blackbox" that renders
+as it is but cannot be edited). The *V-Ray Scene Reference* mode imports the
+file as one proxy instead.
+
+The `.vrscene` box makes EXPORT write one, next to the `.fbx` / `.glb`, with
+V-Ray's own exporter (`vrayExportVRScene … exportSelectionOnly:true`):
+
+- the objects keep their own materials: the file is written after they got
+  them back, nothing is converted;
+- the selected objects only; lights only when the selection holds some; the
+  current view is left out; the render settings go along (the scene units
+  travel with them);
+- texture paths are written as they are: Blender must see the same files
+  (same drive, same folders);
+- V-Ray takes the export settings (displacement, proxies…) from V-Ray GPU,
+  which should be the production renderer; the log warns otherwise.
+
+The log gives the 3ds Max system unit, to check the asset's size in Blender.
 
 ---
 
 ## Changelog
 
+- **1.7** — EXPORT can also write a `.vrscene` of the selection, its V-Ray
+  materials as they are, for V-Ray for Blender (*File > Import > V-Ray Scene*,
+  *Native Objects*). Off by default.
 - **1.6** — Colour VRayBitmaps get the RGB primaries *sRGB* instead of
   *Default*. *Default* converts nothing, so in an ACEScg rendering space an sRGB
   texture was read as ACEScg (over-saturated colours); with *sRGB*, V-Ray
