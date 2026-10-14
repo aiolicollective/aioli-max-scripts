@@ -7,7 +7,7 @@
 	FBX -> Physical Material on import), works on any Physical Material.
 
 	Author   : /ai.oli collective
-	Version  : 1.7.1 (in test)
+	Version  : 1.7.2 (in test)
 	Compat.  : 3ds Max 2017+ (Physical Material) with V-Ray 5+ (metalness,
 	           roughness mode, coat, sheen). Written for 3ds Max 2026 / V-Ray 7.
 	Usage    : Scripting > Run Script, or drag & drop into 3ds Max. The script
@@ -30,8 +30,10 @@
 	it in the scene, in a single undo.
 
 	For V-Ray for Blender (1.7): EXPORT can also write a .vrscene of the
-	selection, its V-Ray materials as they are, nothing converted. In Blender:
-	File > Import > V-Ray Scene (.vrscene), Native Objects.
+	selection, its V-Ray materials as they are. In Blender: File > Import >
+	V-Ray Scene (.vrscene), Native Objects. V-Ray's exporter does not write
+	Physical Materials (1.7.2): they are written as the VRayMtl CONVERT TO
+	V-RAY would make, for the export only.
 -----------------------------------------------------------------------------*/
 
 global aioli_roPhys2Vray      -- the tool window
@@ -90,6 +92,12 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 		local rvUsed = #()          -- VRayMtl map slots dealt with, current material
 		local rvRndWarned = false
 		local rvConverted = 0       -- VRayMtls converted in the run
+		-- .vrscene export (1.7.2)
+		local vsMatSrc = #()        -- materials met on the selection...
+		local vsMatDst = #()        -- ...and the one written in their place (VRayMtl for a Physical)
+		local vsObjs = #()          -- objects given a temporary material for the .vrscene...
+		local vsObjMats = #()       -- ...and their own material, put back after it
+		local vsConverted = 0       -- Physical Materials written as VRayMtl
 
 		----------------------------------------------------------------
 		-- UI
@@ -137,7 +145,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 			checkbox chkGlb "glTF binary (.glb)" checked:true \
 				tooltip:"Writes a .glb of the selection next to the .fbx (3ds Max 2023+ glTF exporter).\nBlender rebuilds roughness, metalness, normal and alpha from a glTF more faithfully than from an FBX."
 			checkbox chkVrscene ".vrscene (V-Ray for Blender)" checked:false \
-				tooltip:"Writes a .vrscene of the selection with its V-Ray materials as they are: nothing is converted.\nIn Blender with V-Ray: File > Import > V-Ray Scene (.vrscene), Native Objects.\nTexture paths are written as they are: Blender must see the same files."
+				tooltip:"Writes a .vrscene of the selection with its V-Ray materials as they are.\nPhysical Materials, which V-Ray's exporter does not write, go in as VRayMtl (for the export only).\nIn Blender with V-Ray: File > Import > V-Ray Scene (.vrscene), Native Objects.\nTexture paths are written as they are: Blender must see the same files."
 			checkbox chkEmbed "Embed textures in the FBX" checked:true \
 				tooltip:"Embed Media: the .fbx carries its textures, Blender unpacks them on import.\nThe FBX exporter's own setting is put back after the export."
 			checkbox chkUnwrap "Plug the texture found inside other maps" checked:true \
@@ -1531,6 +1539,30 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 			converted
 		)
 
+		-- State of a Physical -> V-Ray run: CONVERT, REPORT, and the materials
+		-- converted for a .vrscene export
+		fn fwdReset dryRun =
+		(
+			hasVRayNormal = vrayNormalAvailable()
+			vbClass = vrayBitmapClass()
+			isDry = dryRun
+			rndWarned = false
+			rndDumped = false
+			keptWarned = #()
+			oldNormalBumps = #()
+			vbMade = #()
+			builtMaps = #()
+			rgbLogged = false
+			mtLogged = false
+			csLogged = false
+			nrmSrc = #()
+			nrmDst = #()
+			nrmKept = #()
+			bitmapsSwapped = 0
+			dataBitmaps = #()
+			colorBitmaps = #()
+		)
+
 		----------------------------------------------------------------
 		-- V-RAY -> PHYSICAL (export to Blender)
 		-- FBX and glTF exporters know the Physical Material, Bitmaps and
@@ -2137,6 +2169,94 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 			r
 		)
 
+		-- .vrscene (1.7.2): the material an object carries while the .vrscene is
+		-- written. V-Ray's .vrscene exporter does not write Physical Materials
+		-- ("Unsupported material" in V-Ray's log, test of 1.7): a Physical becomes
+		-- the VRayMtl CONVERT TO V-RAY would make, for the export only. A container
+		-- holding one is copied with it converted: a Multi/Sub-Object rebuilt slot
+		-- by slot, any other (VRayBlendMtl, VRay2SidedMtl...) copied. Anything else
+		-- is written as it is. Nothing here enters the scene's material tree.
+		fn vrayFor m =
+		(
+			local r = m
+			if m != undefined do
+			(
+				local idx = findItem vsMatSrc m
+				if idx > 0 then
+					r = vsMatDst[idx]
+				else
+				(
+					if classOf m == PhysicalMaterial then
+					(
+						logLine ""
+						logLine ("\"" + m.name + "\" -> VRayMtl (for the .vrscene only)")
+						try
+						(
+							r = convertMaterial m
+							vsConverted += 1
+						)
+						catch
+						(
+							warn ("conversion failed, written as it is (V-Ray will leave it out): " + (getCurrentException()))
+							r = m
+						)
+					)
+					else if classOf m == Multimaterial then
+					(
+						local n = 0
+						try (n = m.numsubs) catch (n = 0)
+						local subs = for i = 1 to n collect (vrayFor m.materialList[i])
+						local changed = false
+						for i = 1 to n do if subs[i] != m.materialList[i] do changed = true
+						if changed do
+						(
+							local mm = Multimaterial numsubs:n name:m.name
+							for i = 1 to n do
+							(
+								try (mm.materialIDList[i] = m.materialIDList[i]) catch ()
+								try (mm.names[i] = m.names[i]) catch ()
+								try (mm.mapEnabled[i] = m.mapEnabled[i]) catch ()
+								mm.materialList[i] = subs[i]
+							)
+							r = mm
+						)
+					)
+					else
+					(
+						local n = 0
+						try (n = getNumSubMtls m) catch (n = 0)
+						local subs = #()
+						local changed = false
+						for i = 1 to n do
+						(
+							local sm = undefined
+							try (sm = getSubMtl m i) catch (sm = undefined)
+							local ns = vrayFor sm
+							append subs ns
+							if ns != sm do changed = true
+						)
+						if changed do
+						(
+							local c = undefined
+							try (c = copy m) catch (c = undefined)
+							if c == undefined or c == m then
+								warn (((classOf m) as string) + " \"" + m.name + "\": could not be copied, the Physical Materials inside are written as they are (V-Ray will leave them out)")
+							else
+							(
+								for i = 1 to n where subs[i] != undefined do
+									try (setSubMtl c i subs[i])
+									catch (warn (((classOf m) as string) + " \"" + m.name + "\": sub-material " + (i as string) + " not replaced: " + (getCurrentException())))
+								r = c
+							)
+						)
+					)
+					append vsMatSrc m
+					append vsMatDst r
+				)
+			)
+			r
+		)
+
 		fn fileStamp f = (if doesFileExist f then (getFileModDate f) else "")
 
 		fn findExporter pat =
@@ -2192,10 +2312,11 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 			ok
 		)
 
-		-- .vrscene (1.7): the selection with its materials as V-Ray renders them,
-		-- nothing converted, for V-Ray for Blender (File > Import > V-Ray Scene,
-		-- Native Objects). The view is left out; lights only when the selection
-		-- holds some. The render settings go along: the scene units travel with them.
+		-- .vrscene (1.7): the selection with its V-Ray materials as they are (the
+		-- Physical ones as VRayMtl since 1.7.2, see vrayFor), for V-Ray for Blender
+		-- (File > Import > V-Ray Scene, Native Objects). The view is left out;
+		-- lights only when the selection holds some. The render settings go along:
+		-- the scene units travel with them.
 		fn exportVrscene f =
 		(
 			local ok = false
@@ -2271,12 +2392,15 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 
 		-- EXPORT: temporary materials on the selected objects, the files, then
 		-- every object gets its own material back, whatever happened before.
-		-- The .vrscene is written last, with the objects' own materials.
+		-- The .vrscene is written last, with the objects' own materials, the
+		-- Physical ones swapped for VRayMtl the same way for the time of the export.
 		fn reverseExport cm paths =
 		(
 			local written = #()
 			local needPhys = (paths[1] != undefined) or (paths[2] != undefined)
 			local prepared = needPhys
+			local vsPrepared = false    -- materials were built for the .vrscene in this run
+			local vsAllBack = true      -- every object got its own material back after the .vrscene
 			if needPhys do try
 			(
 				for o in (selection as array) do
@@ -2332,13 +2456,67 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 				(
 					logLine ""
 					logLine "Export .vrscene"
-					try (if (exportVrscene paths[3]) do append written paths[3])
-					catch (warn ("export interrupted: " + (getCurrentException())))
+					-- Physical Materials become VRayMtl for the export only
+					fwdReset false
+					vsPrepared = true
+					local vsReady = true
+					try
+					(
+						for o in (selection as array) do
+						(
+							local m = undefined
+							try (m = o.material) catch (m = undefined)
+							if m != undefined do
+							(
+								local nm = vrayFor m
+								if nm != m do
+								(
+									try
+									(
+										o.material = nm
+										append vsObjs o
+										append vsObjMats m
+									)
+									catch (warn ("\"" + o.name + "\": .vrscene material not assigned: " + (getCurrentException())))
+								)
+							)
+						)
+					)
+					catch
+					(
+						vsReady = false
+						warn (".vrscene not written, preparation failed: " + (getCurrentException()))
+					)
+					-- CONVERT would reload these linear in place; the export changes nothing
+					local keptData = for b in dataBitmaps where (findItem vbMade b) == 0 and (findItem colorBitmaps b) == 0 collect b
+					if chkLinear.checked and keptData.count > 0 do
+						warn ((keptData.count as string) + " data bitmap(s) stay Bitmaps in the .vrscene (option off, or inside a map reused as it is) and keep the scene's colour space")
+					if vsReady do
+					(
+						if vsObjs.count > 0 do logLine ""
+						try (if (exportVrscene paths[3]) do append written paths[3])
+						catch (warn ("export interrupted: " + (getCurrentException())))
+					)
+					-- every object its own material back
+					local vsBack = 0
+					for i = 1 to vsObjs.count do
+					(
+						try (vsObjs[i].material = vsObjMats[i]; vsBack += 1)
+						catch
+						(
+							vsAllBack = false
+							warn ("\"" + vsObjs[i].name + "\": its material could not be put back: " + (getCurrentException()))
+						)
+					)
+					if vsObjs.count > 0 do
+						logLine ("    " + (vsBack as string) + " object(s) given their own material back (" + \
+							(vsConverted as string) + " Physical Material(s) written as VRayMtl)")
 				)
 			)
 			-- the throw-away materials and maps let go of the scene's maps and
 			-- materials, so they never count as users later (Slate clean-up)
-			for t in (rvMatDst + rvBuilt) where t != undefined and (findItem rvMatSrc t) == 0 do
+			-- (not when an object still carries one: it would be left empty)
+			if back == rvObjs.count do for t in (rvMatDst + rvBuilt) where t != undefined and (findItem rvMatSrc t) == 0 do
 			(
 				local k = 0
 				try (k = getNumSubTexmaps t) catch (k = 0)
@@ -2346,6 +2524,17 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 				try (k = getNumSubMtls t) catch (k = 0)
 				for i = 1 to k do try (setSubMtl t i undefined) catch ()
 			)
+			-- same for the materials and maps built for the .vrscene (only this
+			-- run's: builtMaps of an earlier CONVERT are in use in the scene)
+			if vsPrepared and vsAllBack do
+				for t in (vsMatDst + builtMaps) where t != undefined and (findItem vsMatSrc t) == 0 do
+				(
+					local k = 0
+					try (k = getNumSubTexmaps t) catch (k = 0)
+					for i = 1 to k do try (setSubTexmap t i undefined) catch ()
+					try (k = getNumSubMtls t) catch (k = 0)
+					for i = 1 to k do try (setSubMtl t i undefined) catch ()
+				)
 			written
 		)
 
@@ -2403,6 +2592,11 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 			rvUsed = #()
 			rvRndWarned = false
 			rvConverted = 0
+			vsMatSrc = #()
+			vsMatDst = #()
+			vsObjs = #()
+			vsObjMats = #()
+			vsConverted = 0
 		)
 
 		----------------------------------------------------------------
@@ -2422,24 +2616,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 		fn runTool dryRun =
 		(
 			warnCount = 0
-			hasVRayNormal = vrayNormalAvailable()
-			vbClass = vrayBitmapClass()
-			isDry = dryRun
-			rndWarned = false
-			rndDumped = false
-			keptWarned = #()
-			oldNormalBumps = #()
-			vbMade = #()
-			builtMaps = #()
-			rgbLogged = false
-			mtLogged = false
-			csLogged = false
-			nrmSrc = #()
-			nrmDst = #()
-			nrmKept = #()
-			bitmapsSwapped = 0
-			dataBitmaps = #()
-			colorBitmaps = #()
+			fwdReset dryRun
 
 			if not (vrayAvailable()) then
 				messageBox "V-Ray is not loaded: the VRayMtl class does not exist in this session." title:"aioli-phys2vray"
@@ -2550,6 +2727,16 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 					logLine ""
 					logLine ("[aioli-phys2vray] " + (if doExport then "EXPORT FOR BLENDER" else "V-RAY -> PHYSICAL") + " - " + \
 						(found.count as string) + " VRayMtl on " + (selection.count as string) + " selected object(s)")
+					-- with "Propagate Materials to Instances" on, the temporary materials of
+					-- the export (and their restore) would reach instances outside the run
+					local propWas = undefined
+					if doExport do
+						try
+						(
+							propWas = instanceMgr.autoMtlPropagation
+							instanceMgr.autoMtlPropagation = false
+						)
+						catch (propWas = undefined)
 					local redrawWasOff = redrawOff()
 					disableSceneRedraw()
 					try
@@ -2566,6 +2753,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 					(
 						warn ("unexpected error: " + (getCurrentException()))
 					)
+					if propWas != undefined do try (instanceMgr.autoMtlPropagation = propWas) catch ()
 					restoreRedraw redrawWasOff
 					-- the selection the export started with, if something changed it
 					if doExport do
@@ -2583,6 +2771,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 					if doExport and not dirty do try (setSaveRequired false) catch ()
 					local msg = if doExport then
 						((if paths[1] != undefined or paths[2] != undefined then ((rvConverted as string) + " VRayMtl converted for the export, ") else "") + \
+						(if vsConverted > 0 then ((vsConverted as string) + " Physical as VRayMtl in the .vrscene, ") else "") + \
 						(written.count as string) + " file(s) written in " + (elapsed t0) + ", " + (warnCount as string) + " warning(s).")
 					else
 						((n as string) + " VRayMtl replaced by Physical, " + (warnCount as string) + " warning(s). Ctrl+Z to go back.")
