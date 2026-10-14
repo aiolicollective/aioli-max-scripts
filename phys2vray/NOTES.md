@@ -52,6 +52,7 @@ Listener.** That output is the ground truth the open questions below need.
 | 23 | V-Ray for Blender, *Native Objects* import: which of VRayMtl, VRayBitmap (transfer function, primaries), VRayNormalMap, VRayUVWRandomizer come back as editable nodes, which as blackboxes? | Decides whether the `.vrscene` route replaces the FBX / glTF one for V-Ray users. | — |
 | 24 | Normal maps through a `.vrscene`: V-Ray for 3ds Max reads them as DirectX, V-Ray for Blender as OpenGL. Does the relief stay right in Blender? | A flipped relief would need the green flip changed on the way. | `exportVrscene` |
 | 25 | Scale and settings: does the import read the units from the exported render settings (3ds Max often works in cm, Blender in m)? Does it also apply those settings to the Blender scene? | `exportSettings:true` is there for the units; if it overwrites the Blender scene's settings, turn it off and give the scale another way. | `exportVrscene` |
+| 26 | Which exporter leaves the viewport redraw off, V-Ray's `.vrscene` one or the FBX one? | Fixed either way (1.7.1); knowing it would tell whether a `.vrscene`-only export still needs the fix. The log warns when it happens. | `restoreRedraw` |
 
 ---
 
@@ -242,6 +243,19 @@ collective's machines see the same drive. Chaos: the exporter takes its
 settings from V-Ray GPU, which must be the production renderer — warned
 otherwise, not changed. Off by default until the import is tested
 (questions 22 to 25).
+
+### The viewport redraw is put back after a run (1.7.1)
+
+First test of 1.7 (FBX + `.vrscene` of three objects): the files were written,
+but the viewports stayed frozen afterwards, `isSceneRedrawDisabled()` true.
+The tool switches the redraw off and on once around a run; one of the
+exporters switched it off once more and left it so. Since 1.7.1 a run notes
+whether the redraw was on before it and, if it is still off at the end,
+switches it back on — in a loop bounded to 50 steps, never an open `while` —
+and warns. A redraw already off before the run is left off. The selection the
+export started with is put back if it changed (it was found empty after the
+same test; whether the export or a click emptied it is not settled). Every
+file written logs how long it took, and the status line the total.
 
 ### No `return` inside `try`
 
