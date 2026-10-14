@@ -21,7 +21,7 @@ they are, for **V-Ray for Blender**.
 - **File:** `aioli-phys2vray.ms` — single file, no dependency
 - **Compatibility:** 3ds Max 2017+ (Physical Material), V-Ray 5+ (metalness,
   roughness mode, coat, sheen). Written for 3ds Max 2026 / V-Ray 7.
-- **Version:** 1.7.1 — **in test**, see [`NOTES.md`](NOTES.md) and the [changelog](#changelog)
+- **Version:** 1.7.2 — **in test**, see [`NOTES.md`](NOTES.md) and the [changelog](#changelog)
 
 ---
 
@@ -223,7 +223,13 @@ The `.vrscene` box makes EXPORT write one, next to the `.fbx` / `.glb`, with
 V-Ray's own exporter (`vrayExportVRScene … exportSelectionOnly:true`):
 
 - the objects keep their own materials: the file is written after they got
-  them back, nothing is converted;
+  them back, and V-Ray materials go in as they are;
+- **Physical Materials** are the exception (1.7.2): V-Ray's exporter does not
+  write them (its log says *Unsupported material*), so for the export only they
+  become the VRayMtl that CONVERT TO V-RAY would make, inside a Multi/Sub-Object
+  or a blend too. The scene keeps its Physicals. One difference: a data map
+  that stays a Bitmap is not reloaded linear, since that would change the scene
+  (the log says how many);
 - the selected objects only; lights only when the selection holds some; the
   current view is left out; the render settings go along (the scene units
   travel with them);
@@ -239,6 +245,11 @@ and how long each file took to write.
 
 ## Changelog
 
+- **1.7.2** — The `.vrscene` export writes Physical Materials as VRayMtl (the
+  ones CONVERT TO V-RAY would make), for the export only: V-Ray's exporter left
+  them out (*Unsupported material*). The scene is not changed. EXPORT switches
+  *Propagate Materials to Instances* off while it runs (and back after), so the
+  temporary materials never reach instances outside the selection.
 - **1.7.1** — Fix from the first test of 1.7: after an export the viewports
   could stay frozen, because an exporter left the viewport redraw switched off.
   The tool now switches it back on (and says so in the log), puts the selection
