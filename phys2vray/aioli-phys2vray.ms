@@ -7,7 +7,7 @@
 	FBX -> Physical Material on import), works on any Physical Material.
 
 	Author   : /ai.oli collective
-	Version  : 1.7 (in test)
+	Version  : 1.7.1 (in test)
 	Compat.  : 3ds Max 2017+ (Physical Material) with V-Ray 5+ (metalness,
 	           roughness mode, coat, sheen). Written for 3ds Max 2026 / V-Ray 7.
 	Usage    : Scripting > Run Script, or drag & drop into 3ds Max. The script
@@ -159,6 +159,41 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 		(
 			warnCount += 1
 			format "    ! %\n" s
+		)
+
+		-- Seconds since a timeStamp(), for the log (timeStamp restarts at midnight)
+		fn elapsed t0 =
+		(
+			local d = (timeStamp()) - t0
+			if d < 0 do d += 86400000
+			(formattedPrint (d / 1000.0) format:".1f") + " s"
+		)
+
+		fn redrawOff =
+		(
+			local r = false
+			try (r = isSceneRedrawDisabled()) catch (r = false)
+			r
+		)
+
+		-- Ends a run that switched the viewport redraw off. An exporter can switch
+		-- it off once more and leave it so (test of 1.7: frozen viewports after an
+		-- FBX + .vrscene export): when it was on before the run, it is switched
+		-- back on whatever happened, in a bounded loop, and the log says so.
+		fn restoreRedraw wasOff =
+		(
+			enableSceneRedraw()
+			if not wasOff and (redrawOff()) do
+			(
+				local n = 0
+				for i = 1 to 50 while (redrawOff()) do
+				(
+					enableSceneRedraw()
+					n += 1
+				)
+				warn ("the viewport redraw was left off by an exporter: switched back on (" + (n as string) + " step(s))")
+			)
+			completeRedraw()
 		)
 
 		fn hasP obj p =
@@ -2114,6 +2149,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 
 		fn exportFbx f =
 		(
+			local t0 = timeStamp()
 			local before = fileStamp f
 			local cls = findExporter "FBXEXP"
 			-- the FBX plug-in is loaded on first use: its parameter functions exist after
@@ -2131,7 +2167,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 			catch (warn ("FBX export failed: " + (getCurrentException())))
 			if oldEmbed != undefined do try (FBXExporterSetParam "EmbedTextures" oldEmbed) catch ()
 			local ok = (doesFileExist f) and (res == true or (fileStamp f) != before)
-			if ok then logLine ("    written: " + f + (if chkEmbed.checked then "  (textures embedded)" else ""))
+			if ok then logLine ("    written: " + f + (if chkEmbed.checked then "  (textures embedded)" else "") + "  - " + (elapsed t0))
 			else warn ("FBX not written: " + f)
 			ok
 		)
@@ -2144,12 +2180,13 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 				warn "no glTF exporter in this 3ds Max (built in since 3ds Max 2023): .glb not written"
 			else
 			(
+				local t0 = timeStamp()
 				local before = fileStamp f
 				local res = false
 				try (res = exportFile f #noPrompt selectedOnly:true using:cls)
 				catch (warn ("glTF export failed: " + (getCurrentException())))
 				ok = (doesFileExist f) and (res == true or (fileStamp f) != before)
-				if ok then logLine ("    written: " + f + "  (" + (cls as string) + ")")
+				if ok then logLine ("    written: " + f + "  (" + (cls as string) + ")  - " + (elapsed t0))
 				else warn ("glTF not written: " + f)
 			)
 			ok
@@ -2175,6 +2212,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 					warn ("renderer \"" + rn + "\": V-Ray takes the .vrscene export settings (displacement, proxies) from V-Ray GPU, defaults are used")
 				local withLights = false
 				for o in selection where (superClassOf o) == light do withLights = true
+				local t0 = timeStamp()
 				local before = fileStamp f
 				try
 				(
@@ -2189,7 +2227,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 				(
 					local u = "?"
 					try (u = (units.SystemScale as string) + " " + (units.SystemType as string)) catch (u = "?")
-					logLine ("    written: " + f + "  (V-Ray materials as they are" + (if withLights then ", selected lights included" else ", no light") + ")")
+					logLine ("    written: " + f + "  (V-Ray materials as they are" + (if withLights then ", selected lights included" else ", no light") + ")  - " + (elapsed t0))
 					logLine ("    3ds Max system unit: " + u + " - texture paths written as they are")
 					logLine "    in Blender: File > Import > V-Ray Scene (.vrscene), Native Objects"
 				)
@@ -2430,6 +2468,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 						(phys.count as string) + " Physical material(s) on " + (selection.count as string) + \
 						" selected object(s), " + (others as string) + " other object(s) sharing them")
 
+					local redrawWasOff = redrawOff()
 					disableSceneRedraw()
 					try
 					(
@@ -2445,8 +2484,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 					(
 						warn ("unexpected error: " + (getCurrentException()))
 					)
-					enableSceneRedraw()
-					completeRedraw()
+					restoreRedraw redrawWasOff
 
 					if not dryRun do
 					(
@@ -2504,12 +2542,15 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 					local cm = detectColorMgmt()
 					local n = 0
 					local written = #()
+					local t0 = timeStamp()
+					local selBefore = selection as array
 					-- EXPORT leaves the scene as it was: it must not ask to be saved
 					local dirty = true
 					try (dirty = getSaveRequired()) catch (dirty = true)
 					logLine ""
 					logLine ("[aioli-phys2vray] " + (if doExport then "EXPORT FOR BLENDER" else "V-RAY -> PHYSICAL") + " - " + \
 						(found.count as string) + " VRayMtl on " + (selection.count as string) + " selected object(s)")
+					local redrawWasOff = redrawOff()
 					disableSceneRedraw()
 					try
 					(
@@ -2525,12 +2566,24 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 					(
 						warn ("unexpected error: " + (getCurrentException()))
 					)
-					enableSceneRedraw()
-					completeRedraw()
+					restoreRedraw redrawWasOff
+					-- the selection the export started with, if something changed it
+					if doExport do
+					(
+						local selNow = selection as array
+						local changed = selNow.count != selBefore.count
+						for o in selBefore while not changed do
+							if (findItem selNow o) == 0 do changed = true
+						if changed do
+						(
+							undo off (try (select (for o in selBefore where isValidNode o collect o)) catch ())
+							logLine "    selection put back as it was before the export"
+						)
+					)
 					if doExport and not dirty do try (setSaveRequired false) catch ()
 					local msg = if doExport then
 						((if paths[1] != undefined or paths[2] != undefined then ((rvConverted as string) + " VRayMtl converted for the export, ") else "") + \
-						(written.count as string) + " file(s) written, " + (warnCount as string) + " warning(s).")
+						(written.count as string) + " file(s) written in " + (elapsed t0) + ", " + (warnCount as string) + " warning(s).")
 					else
 						((n as string) + " VRayMtl replaced by Physical, " + (warnCount as string) + " warning(s). Ctrl+Z to go back.")
 					logLine ("[aioli-phys2vray] " + msg)
