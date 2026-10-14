@@ -21,7 +21,7 @@ they are, for **V-Ray for Blender**.
 - **File:** `aioli-phys2vray.ms` — single file, no dependency
 - **Compatibility:** 3ds Max 2017+ (Physical Material), V-Ray 5+ (metalness,
   roughness mode, coat, sheen). Written for 3ds Max 2026 / V-Ray 7.
-- **Version:** 1.7 — **in test**, see [`NOTES.md`](NOTES.md) and the [changelog](#changelog)
+- **Version:** 1.7.1 — **in test**, see [`NOTES.md`](NOTES.md) and the [changelog](#changelog)
 
 ---
 
@@ -232,12 +232,17 @@ V-Ray's own exporter (`vrayExportVRScene … exportSelectionOnly:true`):
 - V-Ray takes the export settings (displacement, proxies…) from V-Ray GPU,
   which should be the production renderer; the log warns otherwise.
 
-The log gives the 3ds Max system unit, to check the asset's size in Blender.
+The log gives the 3ds Max system unit, to check the asset's size in Blender,
+and how long each file took to write.
 
 ---
 
 ## Changelog
 
+- **1.7.1** — Fix from the first test of 1.7: after an export the viewports
+  could stay frozen, because an exporter left the viewport redraw switched off.
+  The tool now switches it back on (and says so in the log), puts the selection
+  back if it changed, and logs how long each file took to write.
 - **1.7** — EXPORT can also write a `.vrscene` of the selection, its V-Ray
   materials as they are, for V-Ray for Blender (*File > Import > V-Ray Scene*,
   *Native Objects*). Off by default.
