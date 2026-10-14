@@ -52,7 +52,8 @@ Listener.** That output is the ground truth the open questions below need.
 | 23 | V-Ray for Blender, *Native Objects* import: which of VRayMtl, VRayBitmap (transfer function, primaries), VRayNormalMap, VRayUVWRandomizer come back as editable nodes, which as blackboxes? | Decides whether the `.vrscene` route replaces the FBX / glTF one for V-Ray users. | — |
 | 24 | Normal maps through a `.vrscene`: V-Ray for 3ds Max reads them as DirectX, V-Ray for Blender as OpenGL. Does the relief stay right in Blender? | A flipped relief would need the green flip changed on the way. | `exportVrscene` |
 | 25 | Scale and settings: does the import read the units from the exported render settings (3ds Max often works in cm, Blender in m)? Does it also apply those settings to the Blender scene? | `exportSettings:true` is there for the units; if it overwrites the Blender scene's settings, turn it off and give the scale another way. | `exportVrscene` |
-| 26 | Which exporter leaves the viewport redraw off, V-Ray's `.vrscene` one or the FBX one? | Fixed either way (1.7.1); knowing it would tell whether a `.vrscene`-only export still needs the fix. The log warns when it happens. | `restoreRedraw` |
+| 26 | Which exporter leaves the viewport redraw off, V-Ray's `.vrscene` one or the FBX one? | Fixed either way (1.7.1): in the test of 1.7.1 every FBX + `.vrscene` export needed one step. A `.vrscene`-only export would tell. | `restoreRedraw` |
+| 27 | Besides the Physical Material, which 3ds Max materials does V-Ray's `.vrscene` exporter leave out (*Unsupported material* in V-Ray's log)? Standard, Arch & Design, Blend…? | Only the Physical is converted for the export (1.7.2); another one would need the same treatment. | `vrayFor` |
 
 ---
 
@@ -256,6 +257,31 @@ and warns. A redraw already off before the run is left off. The selection the
 export started with is put back if it changed (it was found empty after the
 same test; whether the export or a click emptied it is not settled). Every
 file written logs how long it took, and the status line the total.
+
+### Physical Materials written as VRayMtl in the `.vrscene` (1.7.2)
+
+Test of 1.7.1 on the MCA scene: V-Ray's `.vrscene` exporter logs *Unsupported
+material* for every Physical Material and leaves it out, so those objects came
+without their material. Since 1.7.2 the `.vrscene` export does what the FBX one
+does the other way: the objects get, for the export only, a VRayMtl built by
+the forward converter (`convertMaterial`, same options as CONVERT TO V-RAY, so
+the same VRayBitmaps, randomizer and normal maps), then their own material
+back. A Multi/Sub-Object holding a Physical is rebuilt slot by slot, another
+container (VRayBlendMtl, VRay2SidedMtl…) copied with the Physical swapped.
+Nothing of the scene is modified: the forward converter only reads the
+Physical and plugs new maps into the new VRayMtl; the in-place linear reload
+(`linearFallback`) and the Slate clean-up are not run — so a data map that
+stays a Bitmap keeps the scene's colour space, and the log counts them. The
+temporary materials let go of the scene's maps afterwards — only the ones
+built in that run, since `builtMaps` of an earlier CONVERT are in use in the
+scene, and only when every object got its own material back (one still
+carrying a temporary material would be left empty).
+
+Found in review, true of the FBX / glTF export since 1.4 as well: with
+*Propagate Materials to Instances* on (`instanceMgr.autoMtlPropagation`), an
+`o.material = …` also reaches every instance of the object, and the restore
+would then put one object's material on another. EXPORT switches it off for
+the run and puts it back after, whatever happens.
 
 ### No `return` inside `try`
 
