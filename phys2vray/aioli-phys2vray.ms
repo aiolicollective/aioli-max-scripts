@@ -7,7 +7,7 @@
 	FBX -> Physical Material on import), works on any Physical Material.
 
 	Author   : /ai.oli collective
-	Version  : 1.7.2 (in test)
+	Version  : 1.8 (in test)
 	Compat.  : 3ds Max 2017+ (Physical Material) with V-Ray 5+ (metalness,
 	           roughness mode, coat, sheen). Written for 3ds Max 2026 / V-Ray 7.
 	Usage    : Scripting > Run Script, or drag & drop into 3ds Max. The script
@@ -34,6 +34,11 @@
 	V-Ray Scene (.vrscene), Native Objects. V-Ray's exporter does not write
 	Physical Materials (1.7.2): they are written as the VRayMtl CONVERT TO
 	V-RAY would make, for the export only.
+
+	Instances and cameras (1.8): the FBX keeps the instances of the
+	selection (Preserve Instances, an option). FBX and glTF lose V-Ray
+	cameras and lights, the log says so; the .vrscene writes the view when
+	the active viewport looks through a selected camera.
 -----------------------------------------------------------------------------*/
 
 global aioli_roPhys2Vray      -- the tool window
@@ -148,11 +153,13 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 				tooltip:"Writes a .vrscene of the selection with its V-Ray materials as they are.\nPhysical Materials, which V-Ray's exporter does not write, go in as VRayMtl (for the export only).\nIn Blender with V-Ray: File > Import > V-Ray Scene (.vrscene), Native Objects.\nTexture paths are written as they are: Blender must see the same files."
 			checkbox chkEmbed "Embed textures in the FBX" checked:true \
 				tooltip:"Embed Media: the .fbx carries its textures, Blender unpacks them on import.\nThe FBX exporter's own setting is put back after the export."
+			checkbox chkInstances "Keep instances in the FBX" checked:true \
+				tooltip:"Preserve Instances: instanced objects share one mesh in the .fbx, and Blender\nimports them as linked meshes. Off: every object gets its own copy of the mesh.\nThe FBX exporter's own setting is put back after the export."
 			checkbox chkUnwrap "Plug the texture found inside other maps" checked:true \
 				tooltip:"FBX and glTF only carry plain bitmaps: an Output, Color Correction, Triplanar... is lost on the way.\nOn: a map holding a single texture is replaced by that texture (what the map did is lost, the log says so).\nOff: the map is plugged as it is, and Blender will not see its texture."
 		)
 		button btnExport "EXPORT SELECTION..." width:136 height:30 across:2 \
-			tooltip:"Gives the selection Physical Materials for the export only, writes the FBX / .glb,\nthen puts the VRayMtl back. The .vrscene keeps the VRayMtl as they are.\nThe scene is left as it was, nothing goes to the undo stack."
+			tooltip:"Gives the selection Physical Materials for the export only, writes the FBX / .glb,\nthen puts the VRayMtl back. The .vrscene keeps the VRayMtl as they are\n(and the view, when the active viewport looks through a selected camera).\nThe scene is left as it was, nothing goes to the undo stack."
 		button btnToPhys "CONVERT IN SCENE" width:136 height:30 \
 			tooltip:"Replaces the VRayMtl of the selection with Physical Materials in the scene,\nin a single undo (Ctrl+Z to go back). Export it yourself afterwards."
 
@@ -2278,6 +2285,17 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 			try (oldEmbed = FBXExporterGetParam "EmbedTextures") catch (oldEmbed = undefined)
 			try (FBXExporterSetParam "EmbedTextures" chkEmbed.checked)
 			catch (warn "FBX: Embed Media could not be set, the exporter's own setting is used")
+			-- 1.8: without it the exporter writes one mesh per object, instances
+			-- included (MCA scene, 2026-10-30: 77 linked objects, 77 meshes in Blender)
+			local oldInst = undefined
+			try (oldInst = FBXExporterGetParam "PreserveInstances") catch (oldInst = undefined)
+			local instSet = true
+			try (FBXExporterSetParam "PreserveInstances" chkInstances.checked)
+			catch
+			(
+				instSet = false
+				warn "FBX: Preserve Instances could not be set, the exporter's own setting is used"
+			)
 			local res = false
 			try
 			(
@@ -2286,8 +2304,10 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 			)
 			catch (warn ("FBX export failed: " + (getCurrentException())))
 			if oldEmbed != undefined do try (FBXExporterSetParam "EmbedTextures" oldEmbed) catch ()
+			if oldInst != undefined do try (FBXExporterSetParam "PreserveInstances" oldInst) catch ()
 			local ok = (doesFileExist f) and (res == true or (fileStamp f) != before)
-			if ok then logLine ("    written: " + f + (if chkEmbed.checked then "  (textures embedded)" else "") + "  - " + (elapsed t0))
+			if ok then logLine ("    written: " + f + (if chkEmbed.checked then "  (textures embedded)" else "") + \
+				(if chkInstances.checked and instSet then "  (Preserve Instances on)" else "") + "  - " + (elapsed t0))
 			else warn ("FBX not written: " + f)
 			ok
 		)
@@ -2314,8 +2334,8 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 
 		-- .vrscene (1.7): the selection with its V-Ray materials as they are (the
 		-- Physical ones as VRayMtl since 1.7.2, see vrayFor), for V-Ray for Blender
-		-- (File > Import > V-Ray Scene, Native Objects). The view is left out;
-		-- lights only when the selection holds some. The render settings go along:
+		-- (File > Import > V-Ray Scene, Native Objects). The view only when the
+		-- active viewport looks through a selected camera (1.8); lights only when the selection holds some. The render settings go along:
 		-- the scene units travel with them.
 		fn exportVrscene f =
 		(
@@ -2333,11 +2353,22 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 					warn ("renderer \"" + rn + "\": V-Ray takes the .vrscene export settings (displacement, proxies) from V-Ray GPU, defaults are used")
 				local withLights = false
 				for o in selection where (superClassOf o) == light do withLights = true
+				-- 1.8: the view (RenderView, and the camera's optics) is written only
+				-- when the active viewport looks through a selected camera: a shot,
+				-- not an asset. Blender rebuilds the camera from it.
+				local withView = false
+				local vc = undefined
+				try (vc = viewport.getCamera()) catch (vc = undefined)
+				if vc != undefined and (superClassOf vc) == camera and (findItem (selection as array) vc) > 0 do withView = true
+				local cams = for o in selection where (superClassOf o) == camera collect o
+				if cams.count > 0 and not withView do
+					warn ("camera \"" + cams[1].name + "\" selected, but the active viewport does not look through it: " + \
+						"the view is not written. Make it the active view to write it.")
 				local t0 = timeStamp()
 				local before = fileStamp f
 				try
 				(
-					fnExp f exportSelectionOnly:true exportView:false exportSettings:true \
+					fnExp f exportSelectionOnly:true exportView:withView exportSettings:true \
 						exportLights:withLights exportGeometry:true exportNodes:true \
 						exportMaterials:true exportTextures:true exportBitmaps:true \
 						separateFiles:false stripPaths:false
@@ -2348,7 +2379,8 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 				(
 					local u = "?"
 					try (u = (units.SystemScale as string) + " " + (units.SystemType as string)) catch (u = "?")
-					logLine ("    written: " + f + "  (V-Ray materials as they are" + (if withLights then ", selected lights included" else ", no light") + ")  - " + (elapsed t0))
+					logLine ("    written: " + f + "  (V-Ray materials as they are" + (if withLights then ", selected lights included" else ", no light") + \
+						(if withView then (", view of camera \"" + vc.name + "\"") else "") + ")  - " + (elapsed t0))
 					logLine ("    3ds Max system unit: " + u + " - texture paths written as they are")
 					logLine "    in Blender: File > Import > V-Ray Scene (.vrscene), Native Objects"
 				)
@@ -2388,6 +2420,31 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 					(if chkVrscene.checked then stem + ".vrscene" else undefined))
 			)
 			r
+		)
+
+		-- 1.8: what FBX / glTF do with the selection, said before they run.
+		-- Instances: objects sharing a base object (true instances and references:
+		-- a reference with its own modifiers may still get its own mesh).
+		-- V-Ray cameras and lights: FBX / glTF write them as empties (no optics,
+		-- no light), only the .vrscene keeps them.
+		fn exportNotes paths =
+		(
+			local geo = for o in selection where (superClassOf o) == GeometryClass and (classOf o) != Targetobject collect o
+			local bases = #()
+			for o in geo do
+			(
+				local b = undefined
+				try (b = o.baseObject) catch (b = undefined)
+				if b != undefined do appendIfUnique bases b
+			)
+			if paths[1] != undefined and bases.count > 0 and bases.count < geo.count do
+				logLine ("    " + (geo.count as string) + " geometry object(s), " + (bases.count as string) + " distinct base object(s) (instances or references): " + \
+					(if chkInstances.checked then "instances kept in the FBX" else "instances NOT kept (option off), every object gets its own mesh"))
+			local cams = for o in selection where (superClassOf o) == camera and (matchPattern ((classOf o) as string) pattern:"*VRay*") collect o
+			local vlights = for o in selection where (superClassOf o) == light and (matchPattern ((classOf o) as string) pattern:"*VRay*") collect o
+			if (cams.count + vlights.count) > 0 and paths[3] == undefined do
+				warn ((cams.count as string) + " V-Ray camera(s), " + (vlights.count as string) + " V-Ray light(s) selected: " + \
+					"FBX / glTF write them as empties (no optics, no light). Tick .vrscene to keep them.")
 		)
 
 		-- EXPORT: temporary materials on the selected objects, the files, then
@@ -2432,6 +2489,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 			(
 				logLine ""
 				logLine "Export"
+				try (exportNotes paths) catch (warn ("export notes failed: " + (getCurrentException())))
 				try
 				(
 					if paths[1] != undefined and (exportFbx paths[1]) do append written paths[1]
@@ -2802,6 +2860,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 				setINISetting iniFile "Settings" "ExportGlb" (chkGlb.checked as string)
 				setINISetting iniFile "Settings" "ExportVrscene" (chkVrscene.checked as string)
 				setINISetting iniFile "Settings" "EmbedTextures" (chkEmbed.checked as string)
+				setINISetting iniFile "Settings" "PreserveInstances" (chkInstances.checked as string)
 				setINISetting iniFile "Settings" "UnwrapMaps" (chkUnwrap.checked as string)
 			)
 			catch()
@@ -2829,6 +2888,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 					v = getINISetting iniFile "Settings" "ExportGlb"; if v != "" do chkGlb.checked = (v == "true")
 					v = getINISetting iniFile "Settings" "ExportVrscene"; if v != "" do chkVrscene.checked = (v == "true")
 					v = getINISetting iniFile "Settings" "EmbedTextures"; if v != "" do chkEmbed.checked = (v == "true")
+					v = getINISetting iniFile "Settings" "PreserveInstances"; if v != "" do chkInstances.checked = (v == "true")
 					v = getINISetting iniFile "Settings" "UnwrapMaps"; if v != "" do chkUnwrap.checked = (v == "true")
 				)
 			)
@@ -2839,7 +2899,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 		-- HANDLERS
 		----------------------------------------------------------------
 		on chkVRayBitmap changed st do chkRandomizer.enabled = st
-		on chkFbx changed st do chkEmbed.enabled = st
+		on chkFbx changed st do (chkEmbed.enabled = st; chkInstances.enabled = st)
 
 		on btnReport pressed do
 		(
@@ -2870,6 +2930,7 @@ global aioli_phys2vray_open   -- entry point called by the macroScript
 			loadSettings()
 			chkRandomizer.enabled = chkVRayBitmap.checked
 			chkEmbed.enabled = chkFbx.checked
+			chkInstances.enabled = chkFbx.checked
 			refreshStatus()
 			local cb = "try (aioli_roPhys2Vray.refreshStatus()) catch ()"
 			callbacks.addScript #selectionSetChanged cb id:#aioli_phys2vray
