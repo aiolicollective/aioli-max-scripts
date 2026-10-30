@@ -45,7 +45,7 @@ Listener.** That output is the ground truth the open questions below need.
 | 16 | Does `DeleteSelection` in a Slate view only remove nodes, or can it also cut a reference in a material? | Only maps whose every owner is an old Physical of the run are removed, so a material in use is never wired to them. Undo of the Slate clean-up not verified. | `cleanViews` |
 | 17 | What does the 3ds Max FBX exporter write for a Physical Material, and what does Blender's FBX importer read back? Base colour, Normal Bump, roughness (and the *Inv* flag), metalness, cutout? | The whole reverse way rests on it. Expected: base colour and normal pass, roughness / metalness unsure. First test: export one asset, import it in Blender, look at the Principled BSDF. | `toPhysical`, `exportFbx` |
 | 18 | Class name of the glTF exporter (`exporterPlugin.classes`, matched on `*gltf*`), and does `#noPrompt` take its default settings? Does it pack roughness and metalness into one texture, and honour *Inv*? | The log prints the class used. No exporter found → warning, no `.glb`. | `exportGlb` |
-| 19 | `FBXExporterGetParam "EmbedTextures"` exists? | If not, Embed Media is set but not put back: the exporter keeps it on afterwards. | `exportFbx` |
+| 19 | `FBXExporterGetParam "EmbedTextures"` (and `"PreserveInstances"`, 1.8) exists? | If not, the setting is set but not put back: the exporter keeps the tool's value afterwards. | `exportFbx` |
 | 20 | VRayNormalMap `normal_map_type` (name and numbering, 0 tangent … 3 world, same as Normal Bump `method`?) | A non-tangent map is warned and its space copied as is. | `exportMap` |
 | 21 | `getSaveRequired` / `setSaveRequired`: does an EXPORT leave the scene unmodified for 3ds Max? | Cosmetic: Max would ask to save a scene that did not change. | `runReverse` |
 | 22 | `vrayExportVRScene … exportSelectionOnly:true`: are materials, lights and the environment limited to the selection too? | An asset must not carry the whole scene. Lights are only asked for when the selection holds some. | `exportVrscene` |
@@ -54,6 +54,8 @@ Listener.** That output is the ground truth the open questions below need.
 | 25 | Scale and settings: does the import read the units from the exported render settings (3ds Max often works in cm, Blender in m)? Does it also apply those settings to the Blender scene? | `exportSettings:true` is there for the units; if it overwrites the Blender scene's settings, turn it off and give the scale another way. | `exportVrscene` |
 | 26 | Which exporter leaves the viewport redraw off, V-Ray's `.vrscene` one or the FBX one? | Fixed either way (1.7.1): in the test of 1.7.1 every FBX + `.vrscene` export needed one step. A `.vrscene`-only export would tell. | `restoreRedraw` |
 | 27 | Besides the Physical Material, which 3ds Max materials does V-Ray's `.vrscene` exporter leave out (*Unsupported material* in V-Ray's log)? Standard, Arch & Design, Blend…? | Only the Physical is converted for the export (1.7.2); another one would need the same treatment. | `vrayFor` |
+| 28 | `FBXExporterSetParam "PreserveInstances"`: does it take, and does Blender's FBX importer give linked meshes? | The whole point of 1.8. If the log warns that it could not be set, or Blender still shows one mesh per object, look at the FBX exporter's dialog (*Preserve Instances*). | `exportFbx` |
+| 29 | `vrayExportVRScene … exportView:true` with a VRayPhysicalCamera as the active view: are `RenderView` and `CameraPhysical` both written, with the camera's own focal length, shift and focus? With the render view locked to another viewport, which one is written? And with `exportView:false`, is a selected camera written at all? | Blender rebuilds the camera from these (MCA pilot, 2026-10-30: `RenderView` transform, `CameraPhysical` field of view, shift = − V-Ray offset). | `exportVrscene` |
 
 ---
 
@@ -282,6 +284,26 @@ Found in review, true of the FBX / glTF export since 1.4 as well: with
 `o.material = …` also reaches every instance of the object, and the restore
 would then put one object's material on another. EXPORT switches it off for
 the run and puts it back after, whatever happens.
+
+### Instances kept, cameras said, view on demand (1.8)
+
+MCA animation pilot (2026-10-30): a set exported with EXPORT SELECTION came into
+Blender with no instance at all — 77 linked objects, 77 meshes, some at 750 k
+vertices each. The FBX exporter's *Preserve Instances* was off. 1.8 sets it from
+an option (on by default) and puts the exporter's own value back, like *Embed
+Media*. Kept as an option rather than forced: if an instance with its own
+modifiers on top comes out wrong in Blender, it can be switched off.
+
+The same pilot found that FBX turns a VRayPhysicalCamera and the V-Ray lights
+into empties (standard and Physical cameras are not warned about: FBX carries
+them as cameras), and that the camera is best rebuilt in Blender from the
+`.vrscene`. The log now says it when cameras or V-Ray lights go out without a
+`.vrscene`. The `.vrscene` keeps `exportView:false` for an asset (decision of
+1.7) and writes the view only when the active viewport looks through a selected
+camera: selecting the camera and looking through it is the explicit request,
+nothing else changes. `.vrscene` stays off by default: the box is remembered in
+the `.ini`, so a user who ticks it keeps it, and the formal import test of 1.7
+has still not been run.
 
 ### No `return` inside `try`
 
