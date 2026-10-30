@@ -21,7 +21,7 @@ they are, for **V-Ray for Blender**.
 - **File:** `aioli-phys2vray.ms` — single file, no dependency
 - **Compatibility:** 3ds Max 2017+ (Physical Material), V-Ray 5+ (metalness,
   roughness mode, coat, sheen). Written for 3ds Max 2026 / V-Ray 7.
-- **Version:** 1.7.2 — **in test**, see [`NOTES.md`](NOTES.md) and the [changelog](#changelog)
+- **Version:** 1.8 — **in test**, see [`NOTES.md`](NOTES.md) and the [changelog](#changelog)
 
 ---
 
@@ -202,11 +202,16 @@ of the panel converts the other way.
   as glass. The log warns on every transparent material.
 - **Not converted, and reported:** anisotropy, translucency, map amounts below
   100 % (the map is plugged at 100 %), and any other map left in a VRayMtl slot.
+- **V-Ray cameras and lights** reach Blender through FBX / glTF as empties: no
+  optics, no light. When the selection holds some and `.vrscene` is not ticked,
+  the log says so. Export the FBX **and** the `.vrscene`: the camera can be
+  rebuilt in Blender from the `.vrscene` (see below).
 
 | Control | Effect |
 |---|---|
 | FBX / glTF binary (.glb) | Which files EXPORT writes. glTF needs 3ds Max 2023+; Blender rebuilds a full Principled BSDF from it (roughness, metalness, normal, alpha), more faithfully than from an FBX. |
 | Embed textures in the FBX | Embed Media: the `.fbx` carries its textures and Blender unpacks them. The FBX exporter's own setting is put back afterwards. The other FBX settings are the exporter's current ones. |
+| Keep instances in the FBX | Preserve Instances (on by default): instanced objects share one mesh in the `.fbx`, and Blender imports them as linked meshes. Off, every object gets its own copy — a scene of 77 instanced objects came into Blender as 77 meshes. The exporter's own setting is put back afterwards. |
 | Plug the texture found inside other maps | See above. |
 | .vrscene (V-Ray for Blender) | Also writes a `.vrscene` of the selection, see below. Off by default. |
 
@@ -231,8 +236,11 @@ V-Ray's own exporter (`vrayExportVRScene … exportSelectionOnly:true`):
   that stays a Bitmap is not reloaded linear, since that would change the scene
   (the log says how many);
 - the selected objects only; lights only when the selection holds some; the
-  current view is left out; the render settings go along (the scene units
-  travel with them);
+  render settings go along (the scene units travel with them);
+- the view is written only when the **active viewport looks through a selected
+  camera** (1.8): a shot rather than an asset. Select the camera with the
+  objects, make it the active view, export. A camera selected without being the
+  active view is warned about, and the view is left out as before;
 - texture paths are written as they are: Blender must see the same files
   (same drive, same folders);
 - V-Ray takes the export settings (displacement, proxies…) from V-Ray GPU,
@@ -245,6 +253,12 @@ and how long each file took to write.
 
 ## Changelog
 
+- **1.8** — Asked for after the MCA animation pilot (Max → FBX → Blender).
+  The FBX keeps the instances of the selection (*Keep instances in the FBX*,
+  on by default; the exporter's own setting is put back after). The log counts
+  the objects sharing a mesh, and warns when cameras or V-Ray lights go out
+  through FBX / glTF without a `.vrscene`. The `.vrscene` writes the view when
+  the active viewport looks through a selected camera.
 - **1.7.2** — The `.vrscene` export writes Physical Materials as VRayMtl (the
   ones CONVERT TO V-RAY would make), for the export only: V-Ray's exporter left
   them out (*Unsupported material*). The scene is not changed. EXPORT switches
