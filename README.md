@@ -4,7 +4,7 @@ Custom tools the [/ai.oli](https://github.com/aiolicollective) collective builds
 itself and runs inside 3ds Max, on the productions where we use it. Kept in one place
 so they stay usable, updatable and shareable.
 
-Four tools so far. Each lives in its own folder with its own README.
+Five tools so far. Each lives in its own folder with its own README.
 
 | Tool | What it does |
 |---|---|
@@ -12,10 +12,12 @@ Four tools so far. Each lives in its own folder with its own README.
 | [**ratiomask**](ratiomask/) | Viewport matte that previews any crop ratio (16:9, 9:16, 4:5…) without ever touching the render settings. Render 1:1, crop later. |
 | [**sunpos**](sunpos/) | Places a sun at the real sun's position for a location, date and time, taking the scene's north rotation into account. NOAA maths, no time zone guessing. |
 | [**phys2vray**](phys2vray/) *(in test)* | Replaces the Physical Materials on the selection (Blender FBX imports, typically) with VRayMtl, every texture map plugged back into the right slot as a VRayBitmap, with one UVW randomizer per material. And the other way round: VRayMtl → Physical for an FBX / glTF export that Blender opens with its textures, or a `.vrscene` that keeps the V-Ray materials for V-Ray for Blender. |
+| [**fbx2vray**](fbx2vray/) *(in test)* | Imports an FBX with its exact V-Ray materials and lights, rebuilt from the `_vray.json` our Blender exporter writes next to it ([format](fbx2vray/FORMAT.md)) — or applies that file to an FBX already in the scene. No `_vray.json`: the FBX alone, and phys2vray to convert it. |
 
 `clonelayers`, `ratiomask` and `phys2vray` are pure MaxScript, single file, no dependency.
-`sunpos` is a Python panel and ships as a folder — it runs on what 3ds Max already
-has (`pymxs`, PySide, the Python standard library), so it needs no install either.
+`sunpos` and `fbx2vray` are Python and ship as a folder — they run on what 3ds Max
+already has (`pymxs`, the Python standard library, and PySide for `sunpos`'s
+panel), so they need no install either.
 
 ---
 
@@ -38,6 +40,7 @@ Then, **once per tool**: drag its `.ms` into a 3ds Max window (or
 | ratiomask | `ratiomask/aioli-ratiomask.ms` |
 | sunpos | `sunpos/aioli-sunpos.ms` |
 | phys2vray | `phys2vray/aioli-phys2vray.ms` |
+| fbx2vray | `fbx2vray/aioli-fbx2vray.ms` |
 
 **None of them needs anything installed in order to be used in 3ds Max.**
 `sunpos` ships an optional `setup.bat`, but that is for running the calculation
@@ -63,6 +66,7 @@ available in the Menus, Quads and Keyboard tabs.
 | `aiolicollective` | `ratiomask` | `aioli_ratiomask` |
 | `aiolicollective` | `sunpos` | `aioli_sunpos` |
 | `aiolicollective` | `phys2vray` | `aioli_phys2vray` |
+| `aiolicollective` | `fbx2vray` | `aioli_fbx2vray` |
 
 All of them behave the same way, on purpose:
 
@@ -93,7 +97,7 @@ None of these tools touch render settings. `clonelayers`, `ratiomask` and
 `sunpos` are renderer-agnostic — `sunpos` moves whichever sun you point it at,
 V-Ray Sun, Corona Sun, native target light or free directional. `phys2vray` is
 the V-Ray one by nature: it needs V-Ray 5+ loaded, and runs on 3ds Max 2017+
-(Physical Material).
+(Physical Material). `fbx2vray` needs V-Ray 5+ too, and the Python 3 of 3ds Max 2022+.
 
 ---
 
@@ -106,6 +110,10 @@ buttons in place, working. `clonelayers` and `sunpos` are at **v1.0**, `ratiomas
 `phys2vray` is at **v1.8, in test**: written without a 3ds Max at hand, now
 being tried on real Blender imports and corrected as we go. Its
 [`NOTES.md`](phys2vray/NOTES.md) lists what is still unverified.
+
+`fbx2vray` is at **v1.0, in test**: its material and light rebuild has served
+our asset library since October 2026; the panel and the work on an FBX already in
+the scene are new — see [`fbx2vray/NOTES.md`](fbx2vray/NOTES.md).
 
 `sunpos` has 47 automated tests covering the maths and the CLI, but its `pymxs`
 layer has not been exercised end to end in Max yet — see
