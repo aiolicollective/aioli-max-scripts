@@ -18,6 +18,10 @@ want to export it yourself. See [V-Ray → Physical](#v-ray--physical-exports-to
 Since 1.7 the export can also write a **.vrscene** that keeps the VRayMtl as
 they are, for **V-Ray for Blender**.
 
+When the FBX comes with a `_vray.json` (written by our V-Ray for Blender
+exporter), [fbx2vray](../fbx2vray/) rebuilds the source scene's exact V-Ray
+materials instead of a correspondence; without one, it hands over to this tool.
+
 - **File:** `aioli-phys2vray.ms` — single file, no dependency
 - **Compatibility:** 3ds Max 2017+ (Physical Material), V-Ray 5+ (metalness,
   roughness mode, coat, sheen). Written for 3ds Max 2026 / V-Ray 7.
